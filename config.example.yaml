@@ -1,0 +1,103 @@
+# LinkedIn Hunter Configuration
+# Copy this to config.yaml and edit to your needs.
+
+# Your personal info for form filling
+profile:
+  first_name: "Jane"
+  last_name: "Doe"
+  email: "jane.doe@example.com"
+  phone: "+1-555-123-4567"
+  city: "San Francisco"
+  state: "CA"
+  country: "United States"
+  linkedin_url: "https://www.linkedin.com/in/janedoe"
+  website: ""
+  years_of_experience: 5
+  # Path to your resume PDF (relative to project root or absolute)
+  resume_path: "resumes/resume.pdf"
+
+# Job search parameters
+search:
+  keywords: "Software Engineer"
+  location: "United States"
+  # Distance in miles: 10, 25, 50, 75, 100
+  distance: 50
+  # Job type: full-time, part-time, contract, internship, temporary
+  job_type: "full-time"
+  # Experience level: internship, entry, associate, mid-senior, director, executive
+  experience_level: "mid-senior"
+  # Remote filter: on-site, remote, hybrid
+  remote: "remote"
+  # Date posted: any, past-month, past-week, past-24h
+  date_posted: "past-week"
+  # Easy Apply only
+  easy_apply_only: true
+  # Salary range (USD, optional)
+  salary_min: 0
+  salary_max: 0
+  # Sort by: relevant, recent
+  sort_by: "recent"
+
+# Application settings
+apply:
+  # Maximum applications per session
+  limit: 25
+  # Daily hard cap
+  daily_limit: 100
+  # Delay between applications (seconds, randomized around this value)
+  delay_min: 3
+  delay_max: 8
+  # Mandatory break after N applications
+  break_after: 10
+  break_duration: 120  # seconds
+  # Skip jobs with these words in title
+  blacklist_title:
+    - "Senior Staff"
+    - "Principal"
+    - "VP"
+  # Skip jobs from these companies
+  blacklist_companies:
+    - "Scam Corp"
+  # Follow company after applying
+  follow_company: false
+
+# Default answers for common Easy Apply questions
+answers:
+  # Visa sponsorship required?
+  sponsorship_required: false
+  # Authorized to work in the US?
+  authorized_to_work: true
+  # Willing to relocate?
+  willing_to_relocate: true
+  # Expected salary (annual)
+  desired_salary: "120000"
+  # How did you hear about this position?
+  how_did_you_hear: "LinkedIn"
+  # Cover letter (brief, used if a text field asks for one)
+  cover_letter: "I am excited about this opportunity and believe my skills align well with the role requirements. I look forward to discussing how I can contribute to your team."
+  # Additional custom question-answer pairs (regex pattern -> answer)
+  custom:
+    - pattern: "years?.*(python|java|javascript)"
+      answer: "5"
+    - pattern: "gender"
+      answer: "Prefer not to say"
+    - pattern: "race|ethnicity"
+      answer: "Prefer not to say"
+    - pattern: "veteran"
+      answer: "No"
+    - pattern: "disability"
+      answer: "Prefer not to say"
+    - pattern: "gpa|GPA"
+      answer: "3.5"
+
+# Browser settings
+browser:
+  headless: false
+  slow_mo: 50  # ms delay between Playwright actions
+  timeout: 30000  # ms
+  user_data_dir: ""  # optional: persist browser profile
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_file: "data/logs/hunter.log"

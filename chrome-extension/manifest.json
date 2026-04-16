@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyPie",
+  "version": "1.0.0",
+  "description": "AI-powered universal job application assistant — applies on LinkedIn, Workday, Greenhouse, Lever, and any career site",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "sidePanel",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*",
+    "https://api.anthropic.com/*",
+    "http://localhost:3456/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.myworkdayjobs.com/*",
+        "https://www.myworkday.com/*",
+        "https://*.greenhouse.io/*",
+        "https://boards.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.oraclecloud.com/*",
+        "https://*.ashbyhq.com/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.workable.com/*",
+        "https://*.successfactors.com/*",
+        "https://*.breezy.hr/*",
+        "https://*.recruitee.com/*",
+        "https://*.jazz.co/*",
+        "https://*.applytojob.com/*",
+        "https://*.dover.com/*",
+        "https://*.rippling.com/*"
+      ],
+      "js": ["content/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Runtime data
+data/
+resumes/
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# Virtual environments
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Archives
+*.zip
+
+# Logs
+*.log
