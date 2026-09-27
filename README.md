@@ -158,3 +158,7 @@ Execute the full regression test suite:
 ## Safety & Disclaimer
 
 This automation tool is designed for personal productivity and job hunting efficiency. Always review and customize your answers in `config.yaml` to ensure all submitted details are accurate, truthful, and representative of your professional experience.
+
+## To install .requirement.txt
+pip install -r requirements.txt
+playwright install chromium
