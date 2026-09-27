@@ -25,7 +25,234 @@ console = Console(file=io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", err
 JOBS_PER_PAGE = 25
 
 
-async def run_search(config: HunterConfig, limit: int = 50) -> list[JobCard]:
+async def collect_search_jobs(
+    page: Page,
+    config: HunterConfig,
+    target_count: int = 50,
+) -> list[JobCard]:
+    """Collect up to `target_count` unique JobCards using continuous container scrolling.
+
+    Adapted for LinkedIn's new AI-powered search (/jobs/search-results/) and virtualized DOM.
+    Instead of broken start=25 offset URLs, navigates to the search URL once and incrementally
+    scrolls the left results container, deduplicating newly mounted cards by linkedin_id.
+    """
+    seen_ids: set[str] = set()
+    unique_cards: list[JobCard] = []
+
+    console.print(f"\n[bold]Search collection:[/bold]")
+    console.print(f"  Target: {target_count} unique jobs")
+    console.print(f"  Keywords: {config.search.keywords}")
+    console.print(f"  Location: {config.search.location}\n")
+
+    url = build_search_url(config.search)
+    log.info("Fetching search URL: %s", url)
+
+    await page.goto(url, wait_until="domcontentloaded")
+    try:
+        await page.wait_for_selector(
+            "ul.scaffold-layout__list-container, div.scaffold-layout__list",
+            timeout=15000,
+        )
+    except Exception:
+        log.warning("Job list container not found, waiting extra time...")
+    await human_delay()
+
+    # Diagnostic inspection of page and scrollable elements on initial load
+    try:
+        result_info = await page.evaluate("""() => ({
+            bodyText: document.body.innerText.match(/\\d[\\d,]*\\s+results/i)?.[0] || null,
+            cards: document.querySelectorAll('li[data-occludable-job-id], li.jobs-search-results__list-item').length,
+            listItems: document.querySelectorAll('li').length,
+            url: location.href
+        })""")
+        log.info("[SEARCH-DIAG] Result info: %s", result_info)
+    except Exception as e:
+        log.debug("[SEARCH-DIAG] Result info error: %s", e)
+
+    try:
+        scrollables = await page.evaluate("""() => {
+            const els = [...document.querySelectorAll('*')];
+            return els.map((el, i) => {
+                const s = getComputedStyle(el);
+                return {
+                    i,
+                    tag: el.tagName,
+                    id: el.id,
+                    cls: typeof el.className === 'string' ? el.className.slice(0, 60) : '',
+                    scrollTop: el.scrollTop,
+                    scrollHeight: el.scrollHeight,
+                    clientHeight: el.clientHeight,
+                    overflowY: s.overflowY,
+                    hasCards: !!el.querySelector('li[data-occludable-job-id], li.jobs-search-results__list-item')
+                };
+            }).filter(x => x.scrollHeight > x.clientHeight + 20 && ['auto', 'scroll'].includes(x.overflowY)).slice(0, 30);
+        }""")
+        log.info("[SEARCH-DIAG] Scrollable elements: %s", scrollables)
+    except Exception as e:
+        log.debug("[SEARCH-DIAG] Scrollables error: %s", e)
+
+    # 1. Initial collection of currently mounted cards before scrolling
+    initial_cards = await parse_job_cards(page)
+    for card in initial_cards:
+        if card.linkedin_id and card.linkedin_id not in seen_ids:
+            seen_ids.add(card.linkedin_id)
+            unique_cards.append(card)
+            if len(unique_cards) >= target_count:
+                break
+
+    console.print(
+        f"  Initial collection: +{len(unique_cards)} new jobs — "
+        f"Collected: [bold]{len(unique_cards)}[/bold]/{target_count}"
+    )
+    log.info(
+        "Initial collection: +%d new unique cards (total unique: %d/%d)",
+        len(unique_cards),
+        len(unique_cards),
+        target_count,
+    )
+
+    max_scroll_cycles = 40
+    bottom_stable_count = 0
+
+    for cycle in range(max_scroll_cycles):
+        if len(unique_cards) >= target_count:
+            log.info("Reached target collection count of %d unique jobs", target_count)
+            break
+
+        # 2. Scroll the actual scrollable container down to trigger lazy loading
+        scroll_diag = {}
+        try:
+            scroll_diag = await page.evaluate("""() => {
+                const candidates = [
+                    document.querySelector('div.jobs-search-results-list'),
+                    document.querySelector('div.scaffold-layout__list'),
+                    document.querySelector('div.scaffold-layout__list-detail-inner'),
+                    document.querySelector('ul.scaffold-layout__list-container')?.parentElement,
+                    document.querySelector('div.jobs-search__left-rail')
+                ];
+                for (const el of candidates) {
+                    if (el && el.scrollHeight > el.clientHeight + 20) {
+                        const before = el.scrollTop;
+                        el.scrollTop += Math.max(el.clientHeight * 0.75, 400);
+                        const atBottom = (el.scrollTop + el.clientHeight >= el.scrollHeight - 30);
+                        return {
+                            target: el.className || el.tagName,
+                            scrollTopBefore: before,
+                            scrollTopAfter: el.scrollTop,
+                            scrollHeight: el.scrollHeight,
+                            clientHeight: el.clientHeight,
+                            atBottom: atBottom
+                        };
+                    }
+                }
+                const all = [...document.querySelectorAll('div, main, section, aside')];
+                for (const el of all) {
+                    const s = getComputedStyle(el);
+                    if (['auto', 'scroll'].includes(s.overflowY) && el.scrollHeight > el.clientHeight + 20 && el.querySelector('li[data-occludable-job-id], li.jobs-search-results__list-item')) {
+                        const before = el.scrollTop;
+                        el.scrollTop += Math.max(el.clientHeight * 0.75, 400);
+                        const atBottom = (el.scrollTop + el.clientHeight >= el.scrollHeight - 30);
+                        return {
+                            target: el.className || el.tagName,
+                            scrollTopBefore: before,
+                            scrollTopAfter: el.scrollTop,
+                            scrollHeight: el.scrollHeight,
+                            clientHeight: el.clientHeight,
+                            atBottom: atBottom
+                        };
+                    }
+                }
+                const before = window.scrollY;
+                window.scrollBy(0, 600);
+                const atBottom = (window.scrollY + window.innerHeight >= document.body.scrollHeight - 30);
+                return { target: 'WINDOW', scrollTopBefore: before, scrollTopAfter: window.scrollY, atBottom: atBottom };
+            }""")
+        except Exception as e:
+            log.debug("[SCROLL-STEP] eval error: %s", e)
+
+        await asyncio.sleep(1.2)
+        await random_mouse_jiggle(page)
+
+        # 3. Parse newly mounted cards in the DOM
+        cards = await parse_job_cards(page)
+        new_in_cycle = 0
+
+        for card in cards:
+            if not card.linkedin_id:
+                continue
+            if card.linkedin_id not in seen_ids:
+                seen_ids.add(card.linkedin_id)
+                unique_cards.append(card)
+                new_in_cycle += 1
+                if len(unique_cards) >= target_count:
+                    break
+
+        at_bottom = bool(scroll_diag.get("atBottom", False))
+        if new_in_cycle > 0:
+            bottom_stable_count = 0
+            console.print(
+                f"  Scroll step {cycle + 1}: +{new_in_cycle} new jobs — "
+                f"Collected: [bold]{len(unique_cards)}[/bold]/{target_count}"
+            )
+        else:
+            if at_bottom:
+                bottom_stable_count += 1
+            else:
+                bottom_stable_count = 0
+
+        log.info(
+            "[SCROLL-STEP] cycle=%d scrollTop=%s scrollHeight=%s clientHeight=%s atBottom=%s newUnique=%d totalUnique=%d/%d bottomStableCount=%d",
+            cycle + 1,
+            scroll_diag.get("scrollTopAfter"),
+            scroll_diag.get("scrollHeight"),
+            scroll_diag.get("clientHeight"),
+            at_bottom,
+            new_in_cycle,
+            len(unique_cards),
+            target_count,
+            bottom_stable_count,
+        )
+
+        if len(unique_cards) >= target_count:
+            log.info("Reached target collection count of %d unique jobs", target_count)
+            break
+
+        # If at bottom without new cards, check for pagination / "Show more" buttons
+        if bottom_stable_count >= 2:
+            button_clicked = False
+            for selector in [
+                "button.infinite-scroller__show-more-button",
+                "button[aria-label*='See more jobs']",
+                "button[aria-label*='Show more']",
+                "button.scaffold-layout__list-action",
+                "button[aria-label='View next page']",
+                "button[aria-label='Next']",
+                "button.artdeco-pagination__button--next",
+                "ul.artdeco-pagination__pages li.active + li button",
+            ]:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn and await btn.is_visible():
+                        is_disabled = await btn.get_attribute("disabled")
+                        aria_disabled = await btn.get_attribute("aria-disabled")
+                        if not is_disabled and aria_disabled != "true":
+                            await btn.click()
+                            log.info("[PAGINATION] Clicked next/more button: %s", selector)
+                            button_clicked = True
+                            await asyncio.sleep(2.5)
+                            bottom_stable_count = 0
+                            break
+                except Exception:
+                    pass
+
+            if not button_clicked and bottom_stable_count >= 4:
+                log.info("Reached stable bottom (%d checks) with no next/more button found; ending collection", bottom_stable_count)
+                break
+
+    return unique_cards
+
+
+async def run_search(config: HunterConfig, limit: int | None = None) -> list[JobCard]:
     """Execute a job search, save results to DB, and display them."""
     if not has_valid_session():
         console.print("[bold red]No valid session. Run 'linkedin-hunter login' first.[/bold red]")
@@ -35,52 +262,20 @@ async def run_search(config: HunterConfig, limit: int = 50) -> list[JobCard]:
     if not cookies:
         return []
 
+    target_count = limit or config.search.max_jobs or 50
+
     root = get_project_root()
     conn = init_db(str(root / "data" / "hunter.db"))
     job_repo = JobRepository(conn)
     act_repo = ActivityRepository(conn)
 
-    all_cards: list[JobCard] = []
     engine = BrowserEngine(config)
 
     try:
         page = await engine.launch()
         await engine.load_cookies(cookies)
 
-        pages_needed = (limit + JOBS_PER_PAGE - 1) // JOBS_PER_PAGE
-        console.print(f"\n[bold]Searching:[/bold] {config.search.keywords}")
-        console.print(f"[bold]Location:[/bold] {config.search.location}")
-        console.print(f"[bold]Fetching up to:[/bold] {limit} jobs ({pages_needed} pages)\n")
-
-        for page_num in range(pages_needed):
-            start = page_num * JOBS_PER_PAGE
-            url = build_search_url(config.search, start=start)
-            log.info("Fetching page %d: %s", page_num + 1, url)
-
-            await page.goto(url, wait_until="domcontentloaded")
-            await human_delay()
-
-            # Scroll down to load lazy content
-            for _ in range(3):
-                await smooth_scroll(page, "down", 400)
-                await asyncio.sleep(0.5)
-
-            await random_mouse_jiggle(page)
-
-            cards = await parse_job_cards(page)
-            if not cards:
-                log.info("No more results on page %d, stopping", page_num + 1)
-                break
-
-            all_cards.extend(cards)
-            console.print(f"  Page {page_num + 1}: found {len(cards)} jobs")
-
-            if len(all_cards) >= limit:
-                all_cards = all_cards[:limit]
-                break
-
-            if page_num < pages_needed - 1:
-                await human_delay()
+        all_cards = await collect_search_jobs(page, config, target_count=target_count)
 
         # Save to database
         new_count = 0
@@ -105,11 +300,12 @@ async def run_search(config: HunterConfig, limit: int = 50) -> list[JobCard]:
 
         # Display results table
         _display_results(all_cards)
-        console.print(f"\n[bold green]Found {len(all_cards)} jobs ({new_count} new)[/bold green]")
+        console.print(f"\n[bold green]Found {len(all_cards)} unique jobs ({new_count} new)[/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]Search error: {e}[/bold red]")
         log.exception("Search failed")
+        all_cards = []
 
     finally:
         await engine.close()

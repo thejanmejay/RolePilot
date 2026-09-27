@@ -39,6 +39,39 @@ def _hash_question(text: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
+def should_persist_question(question: str) -> bool:
+    """Determine whether a question represents a stable profile fact suitable for persistent memory.
+
+    Dynamic, date-specific, location-specific, interview, or role-dependent questions
+    should NOT be persisted or auto-reused across different job applications.
+    """
+    q = question.lower().strip()
+
+    # Ephemeral / dynamic / job-specific patterns:
+    ephemeral_patterns = [
+        # Specific dates, months, weeks, years
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        r"\b(week of|\d{1,2}(st|nd|rd|th)?\s+(of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))\b",
+        r"\b202[0-9]\b",
+        # Interview / schedule
+        r"\b(interview|in.?person|face.?to.?face|f2f|schedule|slot|available for)\b",
+        # Joining timeframe / notice period / LWD
+        r"\b(immediate joiner|can you start|start immediately|joining within|earliest start|start date|joining date)\b",
+        r"\b(notice period|\blwd\b|last working day|serving notice|\bnp\b)\b",
+        # Specific city / relocation / shift / commute
+        r"\b(currently in|located in|live in|relocate|relocation|open to relocate)\b",
+        r"\b(shifts?|night shifts?|rotational|weekends?|commute|travel|hybrid)\b",
+        # Job-specific CTC / salary offer / budget willingness
+        r"\b(ctc range|salary range|comfortable with (the )?(ctc|salary|package)|budget for this role|pay scale)\b",
+    ]
+    for pat in ephemeral_patterns:
+        if re.search(pat, q):
+            return False
+
+    return True
+
+
 class UserMemory:
     """Persistent cache of user-provided answers to form questions.
 
@@ -59,14 +92,19 @@ class UserMemory:
         self._load()
 
     def _load(self) -> None:
-        """Load memory from YAML file."""
+        """Load memory from YAML file, filtering out any dynamic/ephemeral questions."""
         if not self._path.exists():
             self._entries = {}
             return
         try:
             with open(self._path) as f:
                 raw = yaml.safe_load(f) or {}
-            self._entries = raw.get("entries", {})
+            loaded = raw.get("entries", {})
+            # Prune non-persistable entries if any were previously stored
+            self._entries = {
+                k: v for k, v in loaded.items()
+                if isinstance(v, dict) and should_persist_question(v.get("question", ""))
+            }
             log.info("Loaded %d entries from user memory", len(self._entries))
         except Exception as e:
             log.warning("Failed to load user memory: %s", e)
@@ -85,6 +123,9 @@ class UserMemory:
         Uses both exact hash match and fuzzy normalized-text match.
         Returns the answer string or None.
         """
+        if not should_persist_question(question):
+            return None
+
         key = _hash_question(question)
 
         # Exact hash match
@@ -109,6 +150,10 @@ class UserMemory:
 
     def store(self, question: str, answer: str) -> None:
         """Store a new question→answer pair in memory."""
+        if not should_persist_question(question):
+            log.info("Skipping memory persistence for dynamic/job-specific question: %r", question[:60])
+            return
+
         key = _hash_question(question)
         self._entries[key] = {
             "question": question.strip(),

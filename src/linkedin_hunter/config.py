@@ -19,8 +19,11 @@ class ProfileConfig(BaseModel):
     state: str = ""
     country: str = "United States"
     linkedin_url: str = ""
+    github_url: str = ""
     website: str = ""
-    years_of_experience: int = 0
+    years_of_experience: int = 1
+    months_of_experience: int = 10
+    notice_period_days: int = 30
     resume_path: str = "resumes/resume.pdf"
 
 
@@ -37,6 +40,7 @@ class SearchConfig(BaseModel):
     salary_min: int = 0
     salary_max: int = 0
     sort_by: str = "recent"
+    max_jobs: int = 50
 
 
 class ApplyConfig(BaseModel):

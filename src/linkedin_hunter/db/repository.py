@@ -98,7 +98,7 @@ class ApplicationRepository:
 
     def was_applied(self, job_id: int) -> bool:
         row = self.conn.execute(
-            "SELECT 1 FROM applications WHERE job_id = ? AND status = 'submitted'",
+            "SELECT 1 FROM applications WHERE job_id = ? AND status IN ('submitted', 'already_applied')",
             (job_id,),
         ).fetchone()
         return row is not None

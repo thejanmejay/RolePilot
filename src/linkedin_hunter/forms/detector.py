@@ -31,6 +31,9 @@ class FormField:
     required: bool = False
     options: list[str] = None  # type: ignore[assignment]
     current_value: str = ""
+    name: str = ""
+    element_id: str = ""
+    input_type: str = ""
 
     def __post_init__(self):
         if self.options is None:
@@ -73,10 +76,15 @@ async def detect_form_fields(page: Page) -> list[FormField]:
     existing_uploads = any(f.field_type == FieldType.FILE_UPLOAD for f in fields)
     if file_inputs and not existing_uploads:
         for fi in file_inputs:
+            eid = (await fi.get_attribute("id")) or ""
+            name = (await fi.get_attribute("name")) or ""
             fields.append(FormField(
                 field_type=FieldType.FILE_UPLOAD,
                 label="Resume",
                 element=fi,
+                name=name,
+                element_id=eid,
+                input_type="file",
             ))
 
     log.info("Detected %d form fields total", len(fields))
@@ -150,12 +158,17 @@ async def _classify_group(group: ElementHandle) -> Optional[FormField]:
             text = await opt.text_content()
             if text and text.strip() and text.strip() != "Select an option":
                 options.append(text.strip())
+        eid = (await select_el.get_attribute("id")) or ""
+        name = (await select_el.get_attribute("name")) or ""
         return FormField(
             field_type=FieldType.SELECT,
             label=label,
             element=select_el,
             required=required,
             options=options,
+            name=name,
+            element_id=eid,
+            input_type="select",
         )
 
     # Check for radio buttons
@@ -163,7 +176,6 @@ async def _classify_group(group: ElementHandle) -> Optional[FormField]:
     if radios:
         options = []
         for radio in radios:
-            # Get the label for each radio
             radio_id = await radio.get_attribute("id")
             if radio_id:
                 radio_label = await group.query_selector(f"label[for='{radio_id}']")
@@ -171,7 +183,6 @@ async def _classify_group(group: ElementHandle) -> Optional[FormField]:
                     text = await radio_label.text_content()
                     if text:
                         options.append(text.strip())
-        # For radio groups, get the question text from legend or fieldset label
         radio_label = label
         fieldset = await group.query_selector("fieldset")
         if fieldset:
@@ -180,15 +191,15 @@ async def _classify_group(group: ElementHandle) -> Optional[FormField]:
                 legend_text = (await legend.text_content() or "").strip()
                 if legend_text and len(legend_text) > len(radio_label):
                     radio_label = legend_text
-        # Also try getting question from the group's direct text content
         if not radio_label or len(radio_label) < 10:
             group_text = (await group.text_content() or "").strip()
-            # Remove option texts from group text to get the question
             for opt in options:
                 group_text = group_text.replace(opt, "")
             group_text = group_text.strip()
             if group_text and len(group_text) > len(radio_label):
                 radio_label = group_text
+        eid = (await radios[0].get_attribute("id")) or ""
+        name = (await radios[0].get_attribute("name")) or ""
         log.info("Radio group detected: question='%s', options=%s", radio_label[:80], options)
         return FormField(
             field_type=FieldType.RADIO,
@@ -196,50 +207,74 @@ async def _classify_group(group: ElementHandle) -> Optional[FormField]:
             element=radios[0],
             required=required,
             options=options,
+            name=name,
+            element_id=eid,
+            input_type="radio",
         )
 
     # Check for checkbox
     checkbox = await group.query_selector(MODAL_SELECTORS["checkbox"])
     if checkbox:
+        eid = (await checkbox.get_attribute("id")) or ""
+        name = (await checkbox.get_attribute("name")) or ""
         return FormField(
             field_type=FieldType.CHECKBOX,
             label=label,
             element=checkbox,
             required=required,
+            name=name,
+            element_id=eid,
+            input_type="checkbox",
         )
 
     # Check for textarea
     textarea = await group.query_selector(MODAL_SELECTORS["textarea"])
     if textarea:
         val = (await textarea.input_value()) or ""
+        eid = (await textarea.get_attribute("id")) or ""
+        name = (await textarea.get_attribute("name")) or ""
         return FormField(
             field_type=FieldType.TEXTAREA,
             label=label,
             element=textarea,
             required=required,
             current_value=val,
+            name=name,
+            element_id=eid,
+            input_type="textarea",
         )
 
     # Check for text input
     text_input = await group.query_selector(MODAL_SELECTORS["text_input"])
     if text_input:
         val = (await text_input.input_value()) or ""
+        inp_type = (await text_input.get_attribute("type")) or "text"
+        eid = (await text_input.get_attribute("id")) or ""
+        name = (await text_input.get_attribute("name")) or ""
         return FormField(
             field_type=FieldType.TEXT,
             label=label,
             element=text_input,
             required=required,
             current_value=val,
+            name=name,
+            element_id=eid,
+            input_type=inp_type,
         )
 
     # Check for file upload
     file_input = await group.query_selector(MODAL_SELECTORS["file_upload"])
     if file_input:
+        eid = (await file_input.get_attribute("id")) or ""
+        name = (await file_input.get_attribute("name")) or ""
         return FormField(
             field_type=FieldType.FILE_UPLOAD,
             label=label,
             element=file_input,
             required=required,
+            name=name,
+            element_id=eid,
+            input_type="file",
         )
 
     return None

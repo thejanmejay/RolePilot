@@ -14,10 +14,10 @@ const PORT = 3456;
 // ---- Resolve API Key ----
 // Priority: ANTHROPIC_API_KEY env var > Claude CLI OAuth token (fallback)
 
-function getAuth() {
+function getAuth(quiet = false) {
   // 1. Check for a real API key first
   if (process.env.ANTHROPIC_API_KEY) {
-    console.log('[Auth] Using ANTHROPIC_API_KEY from environment');
+    if (!quiet) console.log('[Auth] Using ANTHROPIC_API_KEY from environment');
     return { type: 'api-key', token: process.env.ANTHROPIC_API_KEY };
   }
 
@@ -32,32 +32,35 @@ function getAuth() {
     const oauth = creds.claudeAiOauth;
 
     if (!oauth?.accessToken) {
-      console.error('No access token found in Claude Code credentials');
+      if (!quiet) {
+        console.warn('[Auth] Claude CLI is not logged in yet (empty accessToken in Keychain).');
+        console.warn('[Auth] Run "claude auth login" in a terminal or set ANTHROPIC_API_KEY.');
+      }
       return null;
     }
 
     if (oauth.expiresAt && Date.now() > oauth.expiresAt) {
-      console.warn('[Warning] OAuth token may be expired. Run "claude" in terminal to refresh.');
+      if (!quiet) console.warn('[Warning] OAuth token may be expired. Run "claude" in terminal to refresh.');
     }
 
-    console.log('[Auth] Using Claude CLI OAuth token from macOS Keychain');
-    console.log(`[Auth] Org: ${creds.organizationUuid || 'default'}`);
-    console.log(`[Auth] Tier: ${oauth.rateLimitTier || 'unknown'}`);
-    console.log(`[Auth] Expires: ${new Date(oauth.expiresAt).toLocaleString()}`);
+    if (!quiet) {
+      console.log('[Auth] Using Claude CLI OAuth token from macOS Keychain');
+      console.log(`[Auth] Org: ${creds.organizationUuid || 'default'}`);
+      console.log(`[Auth] Tier: ${oauth.rateLimitTier || 'unknown'}`);
+      console.log(`[Auth] Expires: ${new Date(oauth.expiresAt).toLocaleString()}`);
+    }
 
     return { type: 'oauth', token: oauth.accessToken };
   } catch (err) {
-    console.error('[Auth] No ANTHROPIC_API_KEY set and could not read Claude CLI credentials.');
-    console.error('[Auth] Set ANTHROPIC_API_KEY or ensure Claude CLI is logged in.');
+    if (!quiet) {
+      console.warn('[Auth] No ANTHROPIC_API_KEY set and could not read Claude CLI credentials.');
+      console.warn('[Auth] Set ANTHROPIC_API_KEY or run "claude auth login".');
+    }
     return null;
   }
 }
 
-const auth = getAuth();
-if (!auth) {
-  console.error('\nFailed to get auth credentials. Exiting.');
-  process.exit(1);
-}
+let auth = getAuth(false);
 
 // ---- Start Server ----
 
@@ -90,6 +93,17 @@ const server = http.createServer(async (req, res) => {
   } catch {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    return;
+  }
+
+  auth = getAuth(true);
+  if (!auth) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: {
+        message: 'No Anthropic credentials configured. Run "claude auth login" in terminal or set ANTHROPIC_API_KEY.'
+      }
+    }));
     return;
   }
 
@@ -180,12 +194,15 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
+  const authLabel = auth
+    ? (auth.type === 'api-key' ? 'ANTHROPIC_API_KEY' : 'Claude CLI OAuth')
+    : 'Waiting for login (run "claude auth login" or set ANTHROPIC_API_KEY)';
   console.log('');
   console.log('===========================================');
   console.log('  ApplyPie - Demo Proxy Server');
   console.log(`  http://localhost:${PORT}`);
   console.log('');
-  console.log(`  Using: ${auth.type === 'api-key' ? 'ANTHROPIC_API_KEY' : 'Claude CLI OAuth'}`);
+  console.log(`  Using: ${authLabel}`);
   console.log('  Extension key: DEMO_KEY');
   console.log('===========================================');
   console.log('');

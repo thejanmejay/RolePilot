@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -18,7 +19,8 @@ from linkedin_hunter.forms.detector import detect_form_fields
 from linkedin_hunter.forms.filler import fill_form_fields
 from linkedin_hunter.forms.resume import extract_resume_text
 from linkedin_hunter.jobs.filters import build_search_url
-from linkedin_hunter.jobs.parser import parse_job_cards
+from linkedin_hunter.jobs.parser import parse_job_cards, JobCard
+from linkedin_hunter.jobs.search import collect_search_jobs
 from linkedin_hunter.tracker.tracker import ApplicationTracker
 from linkedin_hunter.utils.logging import get_logger
 from linkedin_hunter.utils.rate_limiter import RateLimiter
@@ -89,38 +91,20 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
 
         console.print(f"\n{mode}[bold]Starting Apply session[/bold]")
         console.print(f"  Keywords: {config.search.keywords}")
-        console.print(f"  Limit: {limit} applications")
+        console.print(f"  Max Search Target: {config.search.max_jobs} jobs")
+        console.print(f"  Run Limit: {limit} applications")
+        console.print(f"  Daily Limit: {config.apply.daily_limit} applications")
         console.print(f"  Mode: {'Easy Apply only' if config.search.easy_apply_only else 'All jobs (Easy Apply + External like Workday)'}")
         console.print()
 
-        url = build_search_url(config.search)
-        await page.goto(url, wait_until="domcontentloaded")
-        # Wait for the job list to appear before scrolling
-        try:
-            await page.wait_for_selector(
-                "ul.scaffold-layout__list-container, div.scaffold-layout__list",
-                timeout=15000,
-            )
-        except Exception:
-            log.warning("Job list container not found, waiting extra time...")
-            await asyncio.sleep(5)
-        await human_delay()
-
-        # Scroll to load jobs (wrapped to survive page issues)
-        for _ in range(3):
-            try:
-                await smooth_scroll(page, "down", 400)
-                await asyncio.sleep(0.5)
-            except Exception:
-                break
-
-        cards = await parse_job_cards(page)
-        if not cards:
-            console.print("[yellow]No Easy Apply jobs found.[/yellow]")
+        # Step 1: Collect up to config.search.max_jobs unique cards across pages
+        unique_cards = await collect_search_jobs(page, config, target_count=config.search.max_jobs)
+        if not unique_cards:
+            console.print("[yellow]No jobs collected from search.[/yellow]")
             return
 
-        # Save discovered jobs to DB
-        for card in cards:
+        # Save all discovered jobs to DB
+        for card in unique_cards:
             job_repo.upsert_job(
                 linkedin_id=card.linkedin_id,
                 title=card.title,
@@ -133,16 +117,62 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
                 search_keywords=config.search.keywords,
             )
 
-        console.print(f"Found [bold]{len(cards)}[/bold] jobs to process\n")
+        # Step 2: Classify all collected jobs
+        already_applied_cards: list[tuple[JobCard, dict]] = []
+        blacklisted_cards: list[tuple[JobCard, dict, str]] = []
+        eligible_cards: list[tuple[JobCard, dict]] = []
 
-        # Process each job by clicking its card in the search results list
-        for i, card in enumerate(cards):
+        for card in unique_cards:
+            db_job = job_repo.get_job_by_linkedin_id(card.linkedin_id)
+            if not db_job:
+                continue
+
+            # Check if already applied (from LinkedIn badge or local DB)
+            if card.already_applied or tracker.app_repo.was_applied(db_job["id"]):
+                already_applied_cards.append((card, db_job))
+                tracker.record_skipped(db_job["id"], "already applied")
+                if card.already_applied:
+                    tracker.app_repo.record_application(
+                        db_job["id"], status="already_applied", error_message="already applied on LinkedIn", dry_run=False
+                    )
+                continue
+
+            # Check blacklist rules
+            skip_reason = tracker.should_skip_job(db_job)
+            if skip_reason:
+                blacklisted_cards.append((card, db_job, skip_reason))
+                tracker.record_skipped(db_job["id"], skip_reason)
+                continue
+
+            eligible_cards.append((card, db_job))
+
+        # Print classification summary
+        console.print("\n" + "=" * 50)
+        console.print("[bold]Application filtering:[/bold]")
+        console.print(f"  Total Collected:  {len(unique_cards)}")
+        console.print(f"  Already Applied:  {len(already_applied_cards)}")
+        console.print(f"  Blacklisted:      {len(blacklisted_cards)}")
+        console.print(f"  Eligible:         [green]{len(eligible_cards)}[/green]")
+        console.print("=" * 50)
+
+        # Plan applications up to limit
+        to_process = min(len(eligible_cards), limit)
+        console.print(f"\n[bold]Application limit:[/bold]")
+        console.print(f"  Eligible:   {len(eligible_cards)}")
+        console.print(f"  Run limit:  {limit}")
+        console.print(f"  To process: [green]{to_process}[/green]\n")
+
+        if to_process == 0:
+            console.print("[yellow]No new eligible jobs to process in this session.[/yellow]")
+
+        # Step 3: Process eligible jobs
+        for i, (card, db_job) in enumerate(eligible_cards[:limit]):
             # Check for shutdown request (Ctrl+C / stop)
             if is_shutting_down():
                 console.print("\n[bold yellow]Shutdown requested — stopping apply session[/bold yellow]")
                 break
 
-            # Check limits
+            # Check limits (session limit or daily limit)
             limit_reason = tracker.check_limits()
             if limit_reason:
                 console.print(f"\n[yellow]Stopping: {limit_reason}[/yellow]")
@@ -151,38 +181,35 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
             # Check mandatory break
             if tracker.needs_break():
                 console.print(f"\n[cyan]Taking a {config.apply.break_duration}s break...[/cyan]")
-                # Interruptible break — check shutdown every second
                 for _ in range(config.apply.break_duration):
                     if is_shutting_down():
                         break
                     await asyncio.sleep(1)
 
-            # Get job from DB
-            db_job = job_repo.get_job_by_linkedin_id(card.linkedin_id)
-            if not db_job:
-                continue
-
-            # Check skip conditions
-            skip_reason = tracker.should_skip_job(db_job)
-            if skip_reason:
-                console.print(f"  [dim]Skip: {card.title} @ {card.company} ({skip_reason})[/dim]")
-                tracker.record_skipped(db_job["id"], skip_reason)
-                continue
-
             # Rate limit
             await rate_limiter.acquire()
 
-            console.print(f"\n[bold][{i+1}/{len(cards)}] {card.title}[/bold] @ [green]{card.company}[/green]")
+            console.print(f"\n[bold][{i+1}/{to_process}] {card.title}[/bold] @ [green]{card.company}[/green] [dim](Job ID: {card.linkedin_id})[/dim]")
+            log.info("[%d/%d] %s @ %s (Job ID: %s)", i + 1, to_process, card.title, card.company, card.linkedin_id)
 
             try:
-                # Click the job card in the left-pane list to load details in right pane
-                clicked = await _click_job_card(page, card.linkedin_id)
-                if not clicked:
-                    console.print("  [red]Could not click job card[/red]")
-                    tracker.record_failed(db_job["id"], "could not click job card")
+                # Open the job (click card in list or navigate to URL)
+                opened = await _open_job(page, card)
+                if not opened:
+                    console.print("  [red]Could not open job[/red]")
+                    tracker.record_failed(db_job["id"], "could not open job")
                     continue
 
                 await asyncio.sleep(random.uniform(2, 4))
+
+                # Check if right detail pane indicates already applied on LinkedIn
+                if await _is_already_applied_on_page(page):
+                    console.print(f"  [dim]Skip: {card.title} @ {card.company} (already applied on LinkedIn)[/dim]")
+                    tracker.record_skipped(db_job["id"], "already applied on LinkedIn")
+                    tracker.app_repo.record_application(
+                        db_job["id"], status="already_applied", error_message="already applied on LinkedIn", dry_run=False
+                    )
+                    continue
 
                 # Try Easy Apply first
                 easy_apply_found = await _click_easy_apply(page)
@@ -231,12 +258,19 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
 
         console.print("\n" + "=" * 50)
         console.print(f"[bold]Session Summary ({mode.strip() or 'LIVE'})[/bold]")
-        console.print(f"  Applied:  [green]{tracker.stats.applied}[/green]")
-        console.print(f"  Skipped:  [yellow]{tracker.stats.skipped}[/yellow]")
-        console.print(f"  Failed:   [red]{tracker.stats.failed}[/red]")
-        console.print(f"  Total:    {tracker.stats.total_processed}")
-        if tracker.stats.total_processed:
-            console.print(f"  Success:  {tracker.stats.success_rate:.0f}%")
+        applied_label = "Would Apply:    " if dry_run else "Applied:        "
+        console.print(f"  {applied_label} [green]{tracker.stats.applied}[/green]")
+        if tracker.stats.already_applied:
+            console.print(f"  Already Applied: {tracker.stats.already_applied}")
+        if tracker.stats.blacklisted:
+            console.print(f"  Blacklisted:     {tracker.stats.blacklisted}")
+        other_skips = tracker.stats.skipped - tracker.stats.already_applied - tracker.stats.blacklisted
+        if other_skips > 0:
+            console.print(f"  Other Skips:     {other_skips}")
+        console.print(f"  Failed:          [red]{tracker.stats.failed}[/red]")
+        console.print(f"  Total Processed: {tracker.stats.total_processed}")
+        if not dry_run and tracker.stats.total_processed:
+            console.print(f"  Success Rate:    {tracker.stats.success_rate:.0f}%")
 
     except Exception as e:
         console.print(f"[bold red]Apply session error: {e}[/bold red]")
@@ -247,29 +281,63 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
         conn.close()
 
 
-async def _click_job_card(page, linkedin_id: str) -> bool:
-    """Click a job card in the left-pane search results list by its job ID."""
+async def _open_job(page, card: JobCard) -> bool:
+    """Open a job for applying. Tries clicking the card in search list first, falls back to direct URL navigation."""
     try:
-        # Find the li element with matching data-occludable-job-id
-        card_li = await page.query_selector(f'li[data-occludable-job-id="{linkedin_id}"]')
-        if not card_li:
-            log.warning("Job card not found in list for ID %s", linkedin_id)
-            return False
+        # 1. Try finding and clicking the card in the current DOM list
+        card_li = await page.query_selector(f'li[data-occludable-job-id="{card.linkedin_id}"]')
+        if card_li:
+            await card_li.scroll_into_view_if_needed()
+            await asyncio.sleep(0.3)
+            link = await card_li.query_selector("a.job-card-list__title--link, a.job-card-container__link")
+            if link:
+                await link.click()
+            else:
+                await card_li.click()
+            return True
 
-        # Scroll it into view
-        await card_li.scroll_into_view_if_needed()
-        await asyncio.sleep(0.5)
+        # 2. Fall back to direct URL navigation if card is from another page
+        if card.url:
+            log.info("Job card %s not in current DOM view, navigating directly to: %s", card.linkedin_id, card.url)
+            await page.goto(card.url, wait_until="domcontentloaded")
+            await asyncio.sleep(1.5)
+            return True
 
-        # Click the title link inside the card
-        link = await card_li.query_selector("a.job-card-list__title--link, a.job-card-container__link")
-        if link:
-            await link.click()
-        else:
-            await card_li.click()
-
-        return True
+        log.warning("Could not open job %s (no DOM card and no URL)", card.linkedin_id)
+        return False
     except Exception as e:
-        log.warning("Failed to click job card %s: %s", linkedin_id, e)
+        log.warning("Failed to open job %s: %s", card.linkedin_id, e)
+        return False
+
+
+async def _is_already_applied_on_page(page) -> bool:
+    """Check if the job detail pane indicates this job was already applied to."""
+    try:
+        selectors = [
+            "span.artdeco-inline-feedback__message",
+            "div.jobs-apply-button--top-card",
+            "div.jobs-s-apply",
+            "div.job-details-jobs-unified-top-card__primary-description-container span",
+            "div.job-details-jobs-unified-top-card__actions-container",
+            "span.jobs-details__applied-text",
+        ]
+        for sel in selectors:
+            elements = await page.query_selector_all(sel)
+            for el in elements:
+                text = ((await el.text_content()) or "").strip()
+                if not text:
+                    continue
+                # Clean out action button text to prevent false positives
+                cleaned = re.sub(r"(?i)easy\s+apply|apply\s+now|apply\s+on\s+company\s+website", "", text).strip()
+                if not cleaned:
+                    continue
+                # Strict match: "Applied 43m ago", "Applied yesterday", "Applied", etc.
+                if re.search(r"(?i)\bapplied\s+(?:\d+\s*(?:m|h|d|w|mo|month|year|day|hour|minute)s?\s+ago|just\s+now|today|yesterday|on\s+[A-Za-z]+|\d{1,2}/\d{1,2}/\d{2,4})\b", cleaned) or re.match(r"(?i)^applied$", cleaned):
+                    log.info("Job detail pane shows 'Applied' status: %r", text[:60])
+                    return True
+        return False
+    except Exception as e:
+        log.debug("Error checking already applied status on page: %s", e)
         return False
 
 
@@ -528,8 +596,13 @@ async def _process_application_modal(
         # Detect and fill form fields
         fields = await detect_form_fields(page)
         if fields:
-            filled, skipped = await fill_form_fields(page, fields, config, resume_text=resume_text)
-            log.info("Step %d: filled=%d, skipped=%d", step + 1, filled, skipped)
+            filled, skipped, req_failed = await fill_form_fields(page, fields, config, resume_text=resume_text)
+            log.info("Step %d: filled=%d, skipped=%d, req_failed=%s", step + 1, filled, skipped, req_failed)
+            if req_failed:
+                log.warning("Step %d has unfulfilled required fields — abandoning application safely", step + 1)
+                console.print("  [yellow]Skipping application: required question was unanswered[/yellow]")
+                await _dismiss_modal(page)
+                return False
 
         # Uncheck "Follow company" if configured
         if not config.apply.follow_company:

@@ -18,9 +18,8 @@ BUILTIN_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)(require|need|will you need).*(sponsor|visa|h-?1b)", "sponsorship_required"),
     # Relocation
     (r"(?i)(willing|open|able).*(relocat|move)", "willing_to_relocate"),
-    # Salary
-    (r"(?i)(salary|compensation|pay).*(expect|desir|require|range)", "desired_salary"),
-    (r"(?i)(expected|desired).*(salary|compensation|pay)", "desired_salary"),
+    # Salary — generic expected only (excluding specific units, current, or in-hand/take-home)
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|current|present)).*(expected|desired).*(salary|compensation|pay|ctc)", "desired_salary"),
     # How did you hear — multi-language
     (r"(?i)how.*(hear|learn|find).*(about|of|this)", "how_did_you_hear"),
     (r"(?i)c[oó]mo.*(enterar|conocer|supiste|enteraste)", "how_did_you_hear"),  # Spanish
@@ -53,8 +52,14 @@ PROFILE_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)(city|town|cidade|ciudad|ville|stadt|città|thành phố|도시|都市)", "city"),
     (r"(?i)(state|province|estado|provincia|région|bundesland|tỉnh|주|州)", "state"),
     (r"(?i)(country|nation|país|pays|land|paese|quốc gia|국가|国)", "country"),
+    # GitHub / Portfolio / Website (checked before generic profile url)
+    (r"(?i)(github|git).*(url|link|profile)?", "github_url"),
+    (r"(?i)(portfolio|online\s*portfolio|work\s*samples?).*(url|link)?", "github_url"),
+    (r"(?i)(website|personal\s*(url|link|site))", "website"),
+    (r"(?i)(sitio\s*web|página\s*web|portafolio)", "website"),  # Spanish
+    (r"(?i)(site\s*web|site\s*pessoal|portfólio)", "website"),  # Portuguese
     # LinkedIn — multi-language
-    (r"(?i)(linkedin|profile).*(url|link)", "linkedin_url"),
+    (r"(?i)\blinkedin\b.*(url|link|profile)?", "linkedin_url"),
     (r"(?i)(perfil.*linkedin|linkedin.*perfil)", "linkedin_url"),  # Spanish/Portuguese
     (r"(?i)(profil.*linkedin|linkedin.*profil)", "linkedin_url"),  # French/German
     (r"(?i)^perfil\s*de\s*linkedin$", "linkedin_url"),  # Spanish exact
@@ -62,10 +67,13 @@ PROFILE_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)^linkedin\s*url$", "linkedin_url"),
     (r"(?i)^url\s*linkedin$", "linkedin_url"),
     (r"(?i)^linkedin$", "linkedin_url"),  # Just "LinkedIn" as label
-    # Website / Portfolio
-    (r"(?i)(website|portfolio|personal\s*(url|link|site))", "website"),
-    (r"(?i)(sitio\s*web|página\s*web|portafolio)", "website"),  # Spanish
-    (r"(?i)(site\s*web|site\s*pessoal|portfólio)", "website"),  # Portuguese
+    (r"(?i)^profile\s*(url|link)$", "linkedin_url"),  # Generic profile URL without other qualifiers
+    # Notice Period (canonical profile days, e.g. 30)
+    (r"(?i)(notice\s*period|notice\s*days|days\s*(of\s*)?notice|how\s*many\s*days.*notice|days.*(available|to).*join)", "notice_period_days"),
+    # Split Experience: Additional months vs Total years
+    (r"(?i)(additional\s*months?.*experience|months?.*additional.*experience)", "months_of_experience"),
+    (r"(?i)(months?\s*of\s*(professional\s*)?experience|how\s*many\s*months.*experience)", "months_of_experience"),
+    (r"(?i)(total\s*years?.*experience|years?\s*of\s*(professional\s*)?experience|overall.*experience)", "years_of_experience"),
     # Experience — multi-language
     (r"(?i)(years?).*(experience|professional|experiência|experiencia|expérience|erfahrung)", "years_of_experience"),
     (r"(?i)(años|anos|années|jahre).*(experiencia|experiência|expérience|erfahrung)", "years_of_experience"),
@@ -74,6 +82,8 @@ PROFILE_PATTERNS: list[tuple[str, str]] = [
 # Yes/No question detection — answer is tied to config, not hardcoded
 # IMPORTANT: Order matters — more specific patterns MUST come before generic ones
 YES_NO_PATTERNS: list[tuple[str, str]] = [
+    # Immediate joiner / start immediately -> No (since notice period is 30 days)
+    (r"(?i)(immediate(ly)?\s*(joiner|start|available|joining)|(join|start|available)\s*immediately|can\s*you\s*(start|join)\s*immediately|are\s*you\s*(an\s*)?immediate\s*joiner)", "_no"),
     # "Right to work WITHOUT sponsorship" → No (you NEED sponsorship, so you DON'T have the right without it)
     (r"(?i)(right|able|eligible).*(work|employ).*(without|no need).*(sponsor|visa)", "_no"),
     (r"(?i)without.*(need|requirement).*(sponsor|visa)", "_no"),
@@ -87,24 +97,11 @@ YES_NO_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)(authorized|lawfully|legally|eligible).*(work|employ)", "authorized_to_work"),
     # Relocation
     (r"(?i)(willing|open|able).*(relocat|move)", "willing_to_relocate"),
-    # Commute / office / hybrid / on-site
-    (r"(?i)(comfortable|willing|able).*(commut|travel)", "_yes"),
-    (r"(?i)(open|willing|able|okay|ok).*(come|coming|go|going).*(office|on.?site|in.?person)", "_yes"),
-    (r"(?i)(open|willing|comfortable).*(hybrid|on.?site|in.?office|in.?person)", "_yes"),
-    (r"(?i)(work|come).*(from|to|in).*(office|on.?site)", "_yes"),
-    # "Are you ready for this opportunity" / comfortable with X → Yes
-    (r"(?i)are you ready", "_yes"),
-    (r"(?i)are you.*(comfortable|ok|okay).*(with|working|learning)", "_yes"),
-    # Have you read / reviewed / understood job description → Yes
-    (r"(?i)(have you|did you).*(read|review|understand|go through).*(job|jd|description|posting|requirement)", "_yes"),
-    (r"(?i)read.*(job|jd).*(description|posting|requirement)", "_yes"),
-    (r"(?i)(job|jd).*(description|posting).*(read|review|understood|thoroughly)", "_yes"),
-    # Specific nationality questions → No
-    (r"(?i)are you.*(vietnamese|chinese|korean|japanese|brazilian|american|polish|spanish|german|french|british|canadian|australian|indian)", "_no"),
+    # Education / Degree completion -> Yes (user holds Bachelor's B.Tech)
+    (r"(?i)(have you|did you|do you)?.*(completed|finish|hold|have|possess).*(bachelor|b\.?tech|undergraduate|degree|diploma|graduation)", "_yes"),
+    (r"(?i)(completed|finish|hold|possess).*(bachelor|b\.?tech|undergraduate|degree|graduation)", "_yes"),
     # Background check / drug test / screening → Yes
     (r"(?i)(background.*check|drug.*test|screening)", "_yes"),
-    # Do you have experience / proficiency → Yes
-    (r"(?i)(do you have|are you).*(experience|proficien|familiar|knowledge)", "_yes"),
     # Do you have a valid work permit → use authorized_to_work
     (r"(?i)(have|possess|hold).*(valid|current).*(work\s*permit|visa|authorization)", "authorized_to_work"),
     # Common No answers
@@ -187,7 +184,7 @@ MULTI_OPTION_PATTERNS: list[tuple[str, list[str]]] = [
     ]),
     # Notice period as multi-option
     (r"(?i)(notice.*period|período.*aviso|pr[eé]avis)", [
-        "Immediately", "Less than 2 weeks", "0 days", "Ready to join", "Available immediately",
+        "30 days", "1 month", "Within 1 month", "15-30 days", "30", "Less than 2 weeks", "Available immediately", "Immediately",
     ]),
 ]
 
@@ -204,8 +201,8 @@ SELECT_OPTION_PATTERNS: list[tuple[str, list[str]]] = [
     ]),
     # Notice period dropdown
     (r"(?i)(notice.*period|when.*join|when.*start|disponibilidad|availability)", [
-        "Immediately", "Less than 2 weeks", "0-15 days", "Within 1 month",
-        "0 days", "Available now", "Ready immediately",
+        "30 days", "1 month", "Within 1 month", "15-30 days", "30",
+        "Less than 2 weeks", "0-15 days", "Immediately",
     ]),
     # Highest education
     (r"(?i)(highest.*education|education.*level|degree|qualif)", [

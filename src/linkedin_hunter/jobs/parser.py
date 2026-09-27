@@ -24,14 +24,15 @@ class JobCard:
     remote: str = ""
     posted_date: str = ""
     salary: str = ""
+    already_applied: bool = False
 
 
 # Selectors for LinkedIn job search results (2025 layout)
 SELECTORS = {
-    "job_cards": "li[data-occludable-job-id]",
-    "title": "a.job-card-list__title--link, a.job-card-container__link",
-    "company": "div.artdeco-entity-lockup__subtitle span",
-    "location": "div.artdeco-entity-lockup__caption li span",
+    "job_cards": "li[data-occludable-job-id], li.jobs-search-results__list-item",
+    "title": "a.job-card-list__title--link, a.job-card-container__link, a[data-control-name='job_card_title'], a[href*='/jobs/view/']",
+    "company": "div.artdeco-entity-lockup__subtitle span, span.job-card-container__primary-description, .job-card-container__company-name, div.artdeco-entity-lockup__subtitle",
+    "location": "div.artdeco-entity-lockup__caption li span, ul.job-card-container__metadata-wrapper li, div.artdeco-entity-lockup__caption",
     "easy_apply_badge": "svg[data-test-icon*='linkedin-bug'], li.job-card-container__footer-item",
     "posted_date": "time",
     "salary": "span.job-card-container__metadata-item--salary",
@@ -42,7 +43,6 @@ def _extract_job_id(element_id: str = "", url: str = "") -> str:
     """Extract LinkedIn job ID from data attributes or URL."""
     # Try from element data attribute (e.g., "ember123" or direct job ID)
     if element_id:
-        # Pattern: numbers in the element id
         match = re.search(r"(\d{5,})", element_id)
         if match:
             return match.group(1)
@@ -71,41 +71,13 @@ async def _safe_text(element: Optional[ElementHandle], selector: str) -> str:
 
 
 async def parse_job_cards(page: Page) -> list[JobCard]:
-    """Parse all visible job cards on the current search results page."""
-    import asyncio
+    """Parse all visible job cards currently mounted in the search results DOM."""
     cards: list[JobCard] = []
 
-    # Scroll through the job list to un-occlude all cards
-    job_list = await page.query_selector("ul.scaffold-layout__list-container") or \
-               await page.query_selector("div.scaffold-layout__list ul")
-    if job_list:
-        # Scroll the job list container to reveal all items
-        await page.evaluate("""(list) => {
-            return new Promise(resolve => {
-                let scrollTop = 0;
-                const step = 200;
-                const interval = setInterval(() => {
-                    list.scrollTop += step;
-                    if (list.scrollTop >= list.scrollHeight - list.clientHeight || scrollTop === list.scrollTop) {
-                        clearInterval(interval);
-                        resolve();
-                    }
-                    scrollTop = list.scrollTop;
-                }, 100);
-            });
-        }""", job_list)
-        await asyncio.sleep(1)
-
     job_elements = await page.query_selector_all(SELECTORS["job_cards"])
-    log.info("Found %d job card elements on page", len(job_elements))
+    log.debug("Found %d job card elements mounted on page", len(job_elements))
 
-    for elem in job_elements:
-        # Scroll element into view to force it to render
-        try:
-            await elem.scroll_into_view_if_needed()
-            await asyncio.sleep(0.15)
-        except Exception:
-            pass
+    for idx, elem in enumerate(job_elements):
         try:
             # Get title and URL
             title_el = await elem.query_selector(SELECTORS["title"])
@@ -126,8 +98,19 @@ async def parse_job_cards(page: Page) -> list[JobCard]:
                 if url and not url.startswith("http"):
                     url = "https://www.linkedin.com" + url
 
+            # Fallback title if element contains an inner link with text
+            if not title:
+                inner_link = await elem.query_selector("a")
+                if inner_link:
+                    title = ((await inner_link.text_content()) or "").strip()
+                    url = (await inner_link.get_attribute("href")) or ""
+                    if url and not url.startswith("http"):
+                        url = "https://www.linkedin.com" + url
+
             # Get company
             company = await _safe_text(elem, SELECTORS["company"])
+            if not company:
+                company = "Unknown"
 
             # Get location
             location = await _safe_text(elem, SELECTORS["location"])
@@ -144,6 +127,20 @@ async def parse_job_cards(page: Page) -> list[JobCard]:
                     if "easy apply" in fi_text.lower():
                         easy_apply = True
                         break
+
+            # Check if already applied on LinkedIn (e.g. "Applied 43m ago", "Applied")
+            already_applied = False
+            footer_items = await elem.query_selector_all(
+                "li.job-card-container__footer-item, span.job-card-container__footer-item, span.artdeco-inline-feedback__message"
+            )
+            for fi in footer_items:
+                fi_text = ((await fi.text_content()) or "").strip()
+                if not fi_text:
+                    continue
+                # Match "Applied", "Applied 3d ago", "Applied yesterday", etc. but ignore "Easy Apply"
+                if re.match(r"(?i)^applied(?:\s+(?:\d+\s*(?:m|h|d|w|mo|month|year|day|hour|minute)s?\s+ago|just\s+now|today|yesterday|on\s+[A-Za-z]+|\d{1,2}/\d{1,2}/\d{2,4}))?$", fi_text):
+                    already_applied = True
+                    break
 
             # Get job ID — directly from the li attribute
             linkedin_id = (await elem.get_attribute("data-occludable-job-id")) or ""
@@ -170,7 +167,7 @@ async def parse_job_cards(page: Page) -> list[JobCard]:
             # Get salary if shown
             salary = await _safe_text(elem, SELECTORS["salary"])
 
-            if title and company:
+            if title:
                 card = JobCard(
                     linkedin_id=linkedin_id or str(hash(f"{title}{company}"))[:12],
                     title=title,
@@ -180,12 +177,23 @@ async def parse_job_cards(page: Page) -> list[JobCard]:
                     easy_apply=easy_apply,
                     posted_date=posted_date,
                     salary=salary,
+                    already_applied=already_applied,
                 )
                 cards.append(card)
-                log.debug("Parsed job: %s at %s (ID: %s)", title, company, card.linkedin_id)
+                log.info(
+                    "[CARD-DIAG] index=%d id=%s title=%r company=%r already_applied=%s easy_apply=%s",
+                    idx,
+                    card.linkedin_id,
+                    card.title,
+                    card.company,
+                    card.already_applied,
+                    card.easy_apply,
+                )
+            else:
+                log.warning("[CARD-DIAG-DISCARD] index=%d missing title (id=%r company=%r)", idx, linkedin_id, company)
 
         except Exception as e:
-            log.warning("Failed to parse a job card: %s", e)
+            log.warning("Failed to parse a job card at index %d: %s", idx, e)
             continue
 
     return cards

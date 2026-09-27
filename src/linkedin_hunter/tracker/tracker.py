@@ -16,6 +16,8 @@ log = get_logger(__name__)
 class SessionStats:
     applied: int = 0
     skipped: int = 0
+    already_applied: int = 0
+    blacklisted: int = 0
     failed: int = 0
     total_processed: int = 0
 
@@ -93,6 +95,10 @@ class ApplicationTracker:
     def record_skipped(self, job_id: int, reason: str) -> None:
         self._applied_ids.add(job_id)
         self.stats.skipped += 1
+        if "already applied" in reason.lower():
+            self.stats.already_applied += 1
+        elif "blacklist" in reason.lower():
+            self.stats.blacklisted += 1
         self.stats.total_processed += 1
         self.app_repo.record_application(job_id, "skipped", error_message=reason)
 

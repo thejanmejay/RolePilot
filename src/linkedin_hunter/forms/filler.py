@@ -39,10 +39,11 @@ async def fill_form_fields(
     fields: list[FormField],
     config: HunterConfig,
     resume_text: str | None = None,
-) -> tuple[int, int]:
-    """Fill all detected form fields. Returns (filled_count, skipped_count)."""
+) -> tuple[int, int, bool]:
+    """Fill all detected form fields. Returns (filled_count, skipped_count, required_failed)."""
     filled = 0
     skipped = 0
+    required_failed = False
 
     for field in fields:
         try:
@@ -51,12 +52,17 @@ async def fill_form_fields(
                 filled += 1
             else:
                 skipped += 1
+                if field.required:
+                    required_failed = True
+                    log.warning("Required field '%s' could not be filled", field.label)
         except Exception as e:
             log.warning("Error filling field '%s': %s", field.label, e)
             skipped += 1
+            if field.required:
+                required_failed = True
 
-    log.info("Filled %d fields, skipped %d", filled, skipped)
-    return filled, skipped
+    log.info("Filled %d fields, skipped %d (required_failed=%s)", filled, skipped, required_failed)
+    return filled, skipped, required_failed
 
 
 async def _fill_field(
@@ -110,27 +116,33 @@ def _get_numeric_answer(label: str, config: HunterConfig) -> Optional[str]:
     """Get a numeric answer for fields that require numbers."""
     q = label.lower()
 
-    # Notice period / days to join / when can you start (in days)
-    if re.search(r"(notice.?period|how many days.*(join|start)|days.*(join|start)|join.*(day|within)|commit.*(join|within))", q):
-        return "0"
+    # Rating / scale questions: extract scale ceiling (e.g. "out of 5" -> "5", "scale of 10" -> "10")
+    scale_match = re.search(r"(?:out\s*of|scale\s*of|on\s*a\s*scale\s*of\s*(?:1|0)\s*to)\s*(\d+)", q)
+    if scale_match:
+        scale_max = int(scale_match.group(1))
+        return str(scale_max)
 
-    # Rate yourself / scale questions
-    if re.search(r"(rate\s*(yourself|your)|out\s*of\s*10|scale\s*of\s*(1|0).*(10|5)|on\s*a\s*scale)", q):
-        return "7"
+    if re.search(r"(rate\s*(yourself|your)|how\s*would\s*you\s*rate|on\s*a\s*scale)", q):
+        return "5"
 
-    # How many months / years of experience (numeric only field)
-    if re.search(r"(how\s*many\s*(month|year).*experience|month.*experience|experience.*month)", q):
-        return str(config.profile.years_of_experience * 12) if "month" in q else str(config.profile.years_of_experience)
+    # Notice period in days / days available to join
+    if re.search(r"(notice\s*period|notice\s*days|days\s*(of\s*)?notice|how\s*many\s*days.*notice|days.*(available|to).*join)", q):
+        return str(config.profile.notice_period_days)
 
-    # Salary in numeric-only field
+    # Split experience questions: additional months vs total years
+    if re.search(r"(additional\s*months?.*experience|months?.*additional.*experience)", q):
+        return str(config.profile.months_of_experience)
+
+    if re.search(r"(how\s*many\s*months?.*experience|months?\s*of\s*(professional\s*)?experience)", q):
+        return str(config.profile.months_of_experience)
+
+    if re.search(r"(total\s*years?.*experience|how\s*many\s*years?.*experience|years?\s*of\s*(professional\s*)?experience|overall.*experience)", q):
+        return str(config.profile.years_of_experience)
+
+    # Salary in numeric-only field (only when generic, not unit-specific)
     if re.search(r"(salary|compensation|ctc|pay|earning|remuneration).*(number|amount|figure|numeric)?", q):
-        if re.search(r"month", q):
-            return "5000"
-        return config.answers.desired_salary or "60000"
-
-    # Number of days available / start / availability
-    if re.search(r"(number\s*of\s*days|available.*(in|within)\s*\d*\s*days|specify\s*in\s*days)", q):
-        return "0"
+        if not re.search(r"(in-hand|take-home|month|lakh|lpa)", q):
+            return config.answers.desired_salary or None
 
     return None
 
@@ -138,10 +150,13 @@ def _get_numeric_answer(label: str, config: HunterConfig) -> Optional[str]:
 def _extract_from_resume(question: str, resume_text: str) -> Optional[str]:
     """Try to extract an answer from resume text based on the question asked.
 
-    Handles common Easy Apply questions like years of experience with specific
-    technologies, GPA, university name, degree, etc.
+    Handles common Easy Apply questions like university name, degree, GPA, links.
     """
-    q = question.lower()
+    q = question.lower().strip()
+
+    # If this is clearly a Yes/No question, let yes/no matcher handle it
+    if re.search(r"^(have\s+you|did\s+you|do\s+you|are\s+you|will\s+you|can\s+you|is\s+there)", q):
+        return None
 
     # Years of experience with a specific technology
     tech_match = re.search(r"years?.*(experience|proficien).*(with|in|using)?\s*(\w[\w\s#\+\.]*)", q)
@@ -149,13 +164,12 @@ def _extract_from_resume(question: str, resume_text: str) -> Optional[str]:
         tech_match = re.search(r"how\s+(?:many\s+)?years?.*?(\w[\w\s#\+\.]+)", q)
     if tech_match:
         tech = tech_match.group(tech_match.lastindex or 1).strip().lower()
-        # Look for the technology in resume and try to estimate years
         if re.search(re.escape(tech), resume_text, re.IGNORECASE):
-            # Found the tech in resume — return a reasonable default
-            return None  # Let config answer handle this (custom patterns)
+            return None  # Let config custom patterns handle this
 
-    # University / school name
-    if re.search(r"(?i)(university|school|college|alma mater|education)", q):
+    # University / school name (ONLY when asking for name of institution, NOT degree completion Yes/No)
+    if (re.search(r"(?i)(university|school|college|alma mater)\s*(name|\b)|name\s*of\s*(university|school|college|institute)", q)
+            and not re.search(r"(?i)(degree|bachelor|completed|finish|level|hold|have you)", q)):
         edu_match = re.search(
             r"(?:university|college|institute|school)\s+of\s+[\w\s]+|"
             r"[\w\s]+(?:university|college|institute|school)",
@@ -205,16 +219,26 @@ async def _fill_text(
     resume_text: str | None = None,
 ) -> bool:
     """Fill a text input field."""
+    inp_type = field.input_type or "text"
+    try:
+        inp_type = (await field.element.get_attribute("type")) or inp_type
+    except Exception:
+        pass
+
     # Skip if already filled
     if field.current_value:
-        log.debug("Field '%s' already has value: %s", field.label, field.current_value)
+        log.info(
+            "[FIELD] question=%r type=text input_type=%s name=%r id=%r value=%r required=%s prefilled=True",
+            field.label, inp_type, field.name, field.element_id, field.current_value, field.required,
+        )
         return True
 
     # Try config/profile pattern matching first
     answer = match_answer(field.label, config.answers, config.profile)
 
-    # Check if this is a numeric field and the answer might not be numeric
-    if answer and _is_numeric_field(field):
+    # Check if this is a numeric field or type="number" and the answer might not be numeric
+    is_numeric = inp_type == "number" or _is_numeric_field(field)
+    if answer and is_numeric:
         # Validate the answer is numeric; if not, get a numeric one
         try:
             float(answer)
@@ -222,9 +246,11 @@ async def _fill_text(
             numeric = _get_numeric_answer(field.label, config)
             if numeric:
                 answer = numeric
+            else:
+                answer = None
 
     # If no answer yet, try numeric detection
-    if answer is None and _is_numeric_field(field):
+    if answer is None and is_numeric:
         answer = _get_numeric_answer(field.label, config)
 
     # Fallback: try extracting from resume
@@ -242,13 +268,34 @@ async def _fill_text(
 
     # Still stuck on a required field → ask the user with blinking prompt
     if answer is None and field.required:
+        log.info("[TEXT] Question=%r field_type=%r", field.label, inp_type)
+        log.info("[TEXT] No automatic answer found; prompting user")
         user_answer = await prompt_user_for_input(
             question=field.label,
             field_type="text",
         )
+        log.info("[TEXT] User prompt returned: %r", user_answer)
         if user_answer:
-            _get_memory().store(field.label, user_answer)
             answer = user_answer
+
+    # Final validation guards for typed inputs
+    if answer is not None:
+        if is_numeric:
+            try:
+                float(answer.strip())
+            except ValueError:
+                log.warning("Rejecting non-numeric answer %r for numeric field %r", answer, field.label)
+                answer = None
+        elif inp_type == "url" or re.search(r"(url|link|website|portfolio)\b", field.label, re.IGNORECASE):
+            if answer.strip().lower() in {"yes", "no", "true", "false", "n/a"}:
+                log.warning("Rejecting invalid answer %r for URL field %r", answer, field.label)
+                answer = None
+
+    # Diagnostic logging for field and value
+    log.info(
+        "[FIELD] question=%r type=text input_type=%s name=%r id=%r value=%r required=%s",
+        field.label, inp_type, field.name, field.element_id, answer, field.required,
+    )
 
     if answer is None:
         log.debug("No answer for text field: %s", field.label)
@@ -256,30 +303,47 @@ async def _fill_text(
 
     await field.element.click()
     await asyncio.sleep(random.uniform(0.1, 0.3))
-    await field.element.fill("")
-    # Type character by character for human-like behavior
-    for char in answer:
-        await page.keyboard.type(char, delay=random.uniform(30, 100))
 
-    # Handle typeahead/autocomplete dropdowns (e.g., City fields)
-    await asyncio.sleep(0.8)
-    typeahead_option = await page.query_selector(
-        "div.basic-typeahead__triggered-content li:first-child, "
-        "div.search-typeahead-v2__hit:first-child, "
-        "div[data-test-single-typeahead-entity-form-search-result]:first-child"
+    # Fast fill for URLs, email, numbers, or specific identifiers to prevent drops/autocomplete bugs
+    is_url_or_fast_field = (
+        is_numeric
+        or re.search(r"(url|link|profile|website|portfolio|email|phone|ctc|salary|gpa)", field.label, re.IGNORECASE)
+        or answer.startswith("http://")
+        or answer.startswith("https://")
+        or "@" in answer
     )
-    if typeahead_option:
-        await typeahead_option.click()
-        log.info("Selected typeahead suggestion for '%s'", field.label)
-        await asyncio.sleep(0.3)
 
-    log.info("Filled text field '%s' with '%s'", field.label, answer[:30])
+    if is_url_or_fast_field:
+        await field.element.fill(answer)
+    else:
+        await field.element.fill("")
+        for char in answer:
+            await page.keyboard.type(char, delay=random.uniform(20, 60))
+
+    # Handle typeahead/autocomplete dropdowns (only for city/location-like fields)
+    if not is_url_or_fast_field and re.search(r"(city|state|location|address|country|university|school|company)", field.label, re.IGNORECASE):
+        await asyncio.sleep(0.6)
+        typeahead_option = await page.query_selector(
+            "div.basic-typeahead__triggered-content li:first-child, "
+            "div.search-typeahead-v2__hit:first-child, "
+            "div[data-test-single-typeahead-entity-form-search-result]:first-child"
+        )
+        if typeahead_option:
+            await typeahead_option.click()
+            log.info("Selected typeahead suggestion for '%s'", field.label)
+            await asyncio.sleep(0.2)
+
+    log.info("Filled text field '%s' with '%s'", field.label, answer)
     return True
 
 
 def _text_fallback(label: str, config: HunterConfig) -> Optional[str]:
     """Provide sensible fallback answers for required text fields."""
     q = label.lower()
+
+    # Notice period in days
+    if re.search(r"(notice\s*period|notice\s*days|days\s*(of\s*)?notice|how\s*many\s*days.*notice)", q):
+        return str(config.profile.notice_period_days)
 
     # Catch-all "years of experience in <anything>" → default to profile years
     if re.search(r"(years?|how many|how much).*(experience|work|proficien)", q):
@@ -301,9 +365,9 @@ def _text_fallback(label: str, config: HunterConfig) -> Optional[str]:
     if re.search(r"(current|present).*(company|employer|organization)", q):
         return "N/A"
 
-    # Expected joining date / start date → Immediately
+    # Expected joining date / start date
     if re.search(r"(join|start).*(date|when)", q):
-        return "Immediately"
+        return f"{config.profile.notice_period_days} days"
 
     return None
 
@@ -316,6 +380,10 @@ async def _fill_textarea(
 ) -> bool:
     """Fill a textarea field."""
     if field.current_value:
+        log.info(
+            "[FIELD] question=%r type=textarea input_type=textarea name=%r id=%r value=%r required=%s prefilled=True",
+            field.label, field.name, field.element_id, field.current_value, field.required,
+        )
         return True
 
     answer = match_answer(field.label, config.answers, config.profile)
@@ -340,8 +408,12 @@ async def _fill_textarea(
             field_type="textarea",
         )
         if user_answer:
-            _get_memory().store(field.label, user_answer)
             answer = user_answer
+
+    log.info(
+        "[FIELD] question=%r type=textarea input_type=textarea name=%r id=%r value=%r required=%s",
+        field.label, field.name, field.element_id, answer, field.required,
+    )
 
     if answer is None:
         return not field.required
@@ -405,6 +477,87 @@ def _textarea_fallback(label: str, config: HunterConfig) -> Optional[str]:
     return "N/A"
 
 
+def match_option_to_choices(user_answer: str, options: list[str]) -> Optional[str]:
+    """Strictly match a user's answer string to one of the available options.
+
+    Priority order:
+      1. Strict Yes/No matching for Yes/No option sets
+      2. Exact normalized text match (case-insensitive, whitespace-trimmed)
+      3. Numeric value extracted from option labels (e.g. '9' -> '9 months', '4' -> '3-5 years')
+      4. 1-based positional index as fallback (e.g. '2' -> 2nd option if options have no matching number)
+      5. Partial substring match (only if length >= 4)
+    """
+    if not user_answer or not options:
+        return None
+
+    cleaned = user_answer.strip().lower()
+
+    # 1. Strict Yes/No matching if options contain Yes or No
+    has_yes = any(opt.strip().lower() == "yes" for opt in options)
+    has_no = any(opt.strip().lower() == "no" for opt in options)
+
+    if has_yes or has_no:
+        if cleaned in {"yes", "y", "true"}:
+            for opt in options:
+                if opt.strip().lower() == "yes":
+                    return opt
+        elif cleaned in {"no", "n", "false"}:
+            for opt in options:
+                if opt.strip().lower() == "no":
+                    return opt
+        # If this is purely a Yes/No option set, don't allow arbitrary loose matching
+        clean_opts = {opt.strip().lower() for opt in options}
+        if clean_opts.issubset({"yes", "no", "select an option", ""}):
+            return None
+
+    # 2. Exact match (case-insensitive, whitespace-trimmed)
+    for opt in options:
+        if opt.strip().lower() == cleaned:
+            return opt
+
+    # 3. Numeric value extracted from option labels
+    # If user_answer is numeric (e.g. '9', '0', '10', '2'), find the option whose label represents this number
+    if cleaned.isdigit() or re.match(r"^\d+(\.\d+)?$", cleaned):
+        num_val = float(cleaned) if "." in cleaned else int(cleaned)
+
+        # 3a. Exact numeric match at start of option label (e.g. '9' -> '9 months', '0' -> '0 month', '10' -> '10 months')
+        for opt in options:
+            opt_stripped = opt.strip()
+            m = re.match(r"^(\d+)\b", opt_stripped)
+            if m and int(m.group(1)) == num_val:
+                return opt
+
+        # 3b. Range match (e.g. '4' -> '3-5 years', '3 - 5')
+        for opt in options:
+            opt_stripped = opt.strip()
+            range_match = re.match(r"(\d+)\s*[-–]\s*(\d+)", opt_stripped)
+            if range_match:
+                low, high = int(range_match.group(1)), int(range_match.group(2))
+                if low <= num_val <= high:
+                    return opt
+
+        # 3c. Option contains standalone number matching user number (e.g. "Level 9")
+        for opt in options:
+            opt_stripped = opt.strip()
+            num_matches = re.findall(r"\b\d+\b", opt_stripped)
+            if num_matches and any(int(n) == num_val for n in num_matches):
+                return opt
+
+        # 4. 1-based positional index fallback (e.g. '2' -> options[1] when options lack numbers)
+        if isinstance(num_val, int) and 1 <= num_val <= len(options):
+            candidate = options[num_val - 1]
+            if candidate.strip().lower() != "select an option":
+                return candidate
+
+    # 5. Partial substring match ONLY if user_answer is a non-trivial substring of opt (and not vice-versa)
+    if len(cleaned) >= 4:
+        for opt in options:
+            if cleaned in opt.strip().lower():
+                return opt
+
+    return None
+
+
 async def _fill_select(
     page: Page,
     field: FormField,
@@ -416,7 +569,10 @@ async def _fill_select(
     try:
         current_val = await field.element.input_value()
         if current_val and current_val.strip() and current_val != "Select an option":
-            log.debug("Select '%s' already has value: %s", field.label, current_val)
+            log.info(
+                "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s prefilled=True",
+                field.label, field.name, field.element_id, current_val, field.required,
+            )
             return True
     except Exception:
         pass
@@ -428,7 +584,10 @@ async def _fill_select(
         for opt in field.options:
             if opt.lower() == target.lower():
                 await field.element.select_option(label=opt)
-                log.info("Selected '%s' for '%s'", opt, field.label)
+                log.info(
+                    "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s",
+                    field.label, field.name, field.element_id, opt, field.required,
+                )
                 return True
 
     # Try text answer matching from config
@@ -439,42 +598,24 @@ async def _fill_select(
         answer = _extract_from_resume(field.label, resume_text)
 
     if answer:
-        # Try exact match
-        for opt in field.options:
-            if opt.lower() == answer.lower():
-                await field.element.select_option(label=opt)
-                log.info("Selected '%s' for '%s'", opt, field.label)
-                return True
-        # Try partial match
-        for opt in field.options:
-            if answer.lower() in opt.lower() or opt.lower() in answer.lower():
-                await field.element.select_option(label=opt)
-                log.info("Selected '%s' (partial match) for '%s'", opt, field.label)
-                return True
-        # For numeric answers, also try matching just the number
-        if answer.isdigit():
-            for opt in field.options:
-                opt_stripped = opt.strip()
-                # Match "4" against "4 years", "4+", "3-5" (if 4 is in range)
-                if opt_stripped == answer or opt_stripped.startswith(answer + " ") or opt_stripped.startswith(answer + "+"):
-                    await field.element.select_option(label=opt)
-                    log.info("Selected '%s' (numeric match) for '%s'", opt, field.label)
-                    return True
-                # Try matching ranges like "3-5" when answer is "4"
-                range_match = re.match(r"(\d+)\s*[-–]\s*(\d+)", opt_stripped)
-                if range_match:
-                    low, high = int(range_match.group(1)), int(range_match.group(2))
-                    if low <= int(answer) <= high:
-                        await field.element.select_option(label=opt)
-                        log.info("Selected '%s' (range match) for '%s'", opt, field.label)
-                        return True
+        matched = match_option_to_choices(answer, field.options)
+        if matched:
+            await field.element.select_option(label=matched)
+            log.info(
+                "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s (answer match)",
+                field.label, field.name, field.element_id, matched, field.required,
+            )
+            return True
 
     # Try SELECT_OPTION_PATTERNS for known question types
     if field.options:
         select_match = match_select_option(field.label, field.options)
         if select_match:
             await field.element.select_option(label=select_match)
-            log.info("Selected '%s' (select pattern) for '%s'", select_match, field.label)
+            log.info(
+                "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s (select pattern)",
+                field.label, field.name, field.element_id, select_match, field.required,
+            )
             return True
 
     # Check user memory for select fields
@@ -482,61 +623,57 @@ async def _fill_select(
         memory = _get_memory()
         mem_answer = memory.lookup(field.label)
         if mem_answer:
-            for opt in field.options:
-                if mem_answer.lower() in opt.lower() or opt.lower() in mem_answer.lower():
-                    await field.element.select_option(label=opt)
-                    log.info("Selected '%s' (from memory) for '%s'", opt, field.label)
-                    return True
+            matched = match_option_to_choices(mem_answer, field.options)
+            if matched:
+                await field.element.select_option(label=matched)
+                log.info(
+                    "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s (memory)",
+                    field.label, field.name, field.element_id, matched, field.required,
+                )
+                return True
 
     # If required and has options, ask user before falling back to smart defaults
     if field.required and field.options:
+        log.info("[SELECT] Question=%r options=%r", field.label, field.options)
+        log.info("[SELECT] No automatic answer found; prompting user")
         user_answer = await prompt_user_for_input(
             question=field.label,
             field_type="select",
             options=field.options,
         )
+        log.info("[SELECT] User prompt returned: %r", user_answer)
         if user_answer:
-            _get_memory().store(field.label, user_answer)
-            for opt in field.options:
-                if user_answer.lower() in opt.lower() or opt.lower() in user_answer.lower():
-                    await field.element.select_option(label=opt)
-                    log.info("Selected '%s' (user input) for '%s'", opt, field.label)
-                    return True
+            log.info("[SELECT] Matching user answer=%r against options=%r", user_answer, field.options)
+            matched = match_option_to_choices(user_answer, field.options)
+            if matched:
+                await field.element.select_option(label=matched)
+                log.info(
+                    "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s (user prompt)",
+                    field.label, field.name, field.element_id, matched, field.required,
+                )
+                return True
+            log.warning("[SELECT] User answer %r did not match any option: %r", user_answer, field.options)
 
     # If required and has options, try smart fallback
+    # If required and has options, only fallback on explicit confirmation/acknowledgement words
     if field.required and field.options:
-        # Determine appropriate defaults based on question context
         q = field.label.lower()
 
-        # Questions that should default to "Yes"
-        yes_contexts = [
-            r"(read|review|understand|agree|consent|confirm|acknowledge)",
-            r"(open|willing|comfortable|able|ready)",
-            r"(background|drug|screen)",
-            r"(experience|proficien|familiar|knowledge)",
-        ]
-        for ctx in yes_contexts:
-            if re.search(ctx, q):
+        # Only standard confirmation / acknowledgement selects
+        if re.search(r"(agree|consent|confirm|acknowledge|certif)", q):
+            for default in ["confirmed", "acknowledged", "i agree", "agree", "yes"]:
                 for opt in field.options:
-                    if opt.lower() in ("yes", "true", "si", "sí", "oui", "ja", "sim"):
+                    if opt.lower() == default or opt.lower().startswith(default):
                         await field.element.select_option(label=opt)
-                        log.info("Smart fallback (yes-context) for select '%s': picked '%s'", field.label, opt)
+                        log.info(
+                            "[FIELD] question=%r type=select input_type=select name=%r id=%r value=%r required=%s (confirmation fallback)",
+                            field.label, field.name, field.element_id, opt, field.required,
+                        )
                         return True
 
-        # Try standard smart defaults
-        smart_defaults = ["yes", "no", "confirmed", "n/a", "prefer not", "decline"]
-        for default in smart_defaults:
-            for opt in field.options:
-                if opt.lower().startswith(default) or default in opt.lower():
-                    await field.element.select_option(label=opt)
-                    log.info("Smart fallback for select '%s': picked '%s'", field.label, opt)
-                    return True
-
-        # Last resort: first non-empty option
-        if field.options:
-            await field.element.select_option(label=field.options[0])
-            log.warning("No match for required select '%s', picked first option: %s", field.label, field.options[0])
-            return True
+        # Do NOT guess Yes or pick arbitrary options! Fail safely so application is not submitted with wrong data.
+        log.warning("No answer found for required select '%s' (options: %s) — skipping field", field.label, field.options)
+        return False
 
     return not field.required
 
@@ -557,6 +694,10 @@ async def _fill_radio(
         log.info("Yes/No match for '%s': selecting '%s'", field.label, target)
         clicked = await _click_radio_option(page, field, target)
         if clicked:
+            log.info(
+                "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s",
+                field.label, field.name, field.element_id, target, field.required,
+            )
             return True
 
     # 2. Try multi-option matching (citizenship, gender, disability, veteran, etc.)
@@ -566,6 +707,10 @@ async def _fill_radio(
             log.info("Multi-option match for '%s': selecting '%s'", field.label, multi_match)
             clicked = await _click_radio_option(page, field, multi_match)
             if clicked:
+                log.info(
+                    "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s",
+                    field.label, field.name, field.element_id, multi_match, field.required,
+                )
                 return True
 
     # 3. Try text answer matching from config/custom patterns
@@ -577,26 +722,34 @@ async def _fill_radio(
         # Try direct match first
         clicked = await _click_radio_option(page, field, answer)
         if clicked:
+            log.info(
+                "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s",
+                field.label, field.name, field.element_id, answer, field.required,
+            )
             return True
-        # Try partial match against options
-        for opt in field.options:
-            if answer.lower() in opt.lower() or opt.lower() in answer.lower():
-                clicked = await _click_radio_option(page, field, opt)
-                if clicked:
-                    return True
+        matched = match_option_to_choices(answer, field.options)
+        if matched:
+            clicked = await _click_radio_option(page, field, matched)
+            if clicked:
+                log.info(
+                    "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s",
+                    field.label, field.name, field.element_id, matched, field.required,
+                )
+                return True
 
     # 4. Check user memory
     memory = _get_memory()
     mem_answer = memory.lookup(field.label)
     if mem_answer:
-        clicked = await _click_radio_option(page, field, mem_answer)
-        if clicked:
-            return True
-        for opt in field.options:
-            if mem_answer.lower() in opt.lower() or opt.lower() in mem_answer.lower():
-                clicked = await _click_radio_option(page, field, opt)
-                if clicked:
-                    return True
+        matched = match_option_to_choices(mem_answer, field.options)
+        if matched:
+            clicked = await _click_radio_option(page, field, matched)
+            if clicked:
+                log.info(
+                    "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s (memory)",
+                    field.label, field.name, field.element_id, matched, field.required,
+                )
+                return True
 
     # 5. Ask user if still stuck on required field
     if field.required:
@@ -606,15 +759,15 @@ async def _fill_radio(
             options=field.options,
         )
         if user_answer:
-            _get_memory().store(field.label, user_answer)
-            clicked = await _click_radio_option(page, field, user_answer)
-            if clicked:
-                return True
-            for opt in field.options:
-                if user_answer.lower() in opt.lower() or opt.lower() in user_answer.lower():
-                    clicked = await _click_radio_option(page, field, opt)
-                    if clicked:
-                        return True
+            matched = match_option_to_choices(user_answer, field.options)
+            if matched:
+                clicked = await _click_radio_option(page, field, matched)
+                if clicked:
+                    log.info(
+                        "[FIELD] question=%r type=radio input_type=radio name=%r id=%r value=%r required=%s (user prompt)",
+                        field.label, field.name, field.element_id, matched, field.required,
+                    )
+                    return True
 
     return not field.required
 
@@ -680,6 +833,10 @@ async def _click_radio_option(page: Page, field: FormField, target: str) -> bool
 async def _fill_checkbox(page: Page, field: FormField, config: HunterConfig) -> bool:
     """Fill a checkbox (typically agreement/acknowledgment or checkbox group)."""
     is_checked = await field.element.is_checked()
+    log.info(
+        "[FIELD] question=%r type=checkbox input_type=checkbox name=%r id=%r value=%r required=%s",
+        field.label, field.name, field.element_id, is_checked, field.required,
+    )
 
     # For labeled checkbox groups (like PRONOUNS), try to match via patterns
     label_lower = field.label.lower()
@@ -725,6 +882,10 @@ async def _fill_checkbox(page: Page, field: FormField, config: HunterConfig) -> 
 
 async def _fill_file_upload(field: FormField, config: HunterConfig) -> bool:
     """Upload resume PDF."""
+    log.info(
+        "[FIELD] question=%r type=file_upload input_type=file name=%r id=%r required=%s",
+        field.label, field.name, field.element_id, field.required,
+    )
     resume_path = Path(config.profile.resume_path)
     if not resume_path.is_absolute():
         resume_path = get_project_root() / resume_path

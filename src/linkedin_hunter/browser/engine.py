@@ -88,13 +88,34 @@ class BrowserEngine:
     async def close(self) -> None:
         """Gracefully shut down browser."""
         if self._page:
-            await self._page.close()
+            try:
+                if not self._page.is_closed():
+                    await self._page.close()
+            except Exception as e:
+                log.warning("Exception while closing page: %s", e)
+            self._page = None
+
         if self._context:
-            await self._context.close()
+            try:
+                await self._context.close()
+            except Exception as e:
+                log.warning("Exception while closing context: %s", e)
+            self._context = None
+
         if self._browser:
-            await self._browser.close()
+            try:
+                await self._browser.close()
+            except Exception as e:
+                log.warning("Exception while closing browser: %s", e)
+            self._browser = None
+
         if self._playwright:
-            await self._playwright.stop()
+            try:
+                await self._playwright.stop()
+            except Exception as e:
+                log.warning("Exception while stopping playwright: %s", e)
+            self._playwright = None
+
         log.info("Browser closed")
 
     async def __aenter__(self) -> "BrowserEngine":

@@ -473,12 +473,10 @@ async def _fill_file_upload(field: WDFormField, config: HunterConfig) -> bool:
 
 
 async def _ask_user(field: WDFormField) -> Optional[str]:
-    """Ask user for input with blinking prompt and memory storage."""
+    """Ask user for input with blinking prompt for this application."""
     user_answer = await prompt_user_for_input(
         question=field.label,
         field_type=field.field_type.value,
         options=field.options if field.options else None,
     )
-    if user_answer:
-        _get_memory().store(field.label, user_answer)
     return user_answer

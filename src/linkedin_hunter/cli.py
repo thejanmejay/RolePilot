@@ -465,14 +465,14 @@ def search(ctx: click.Context, keywords: str | None, location: str | None, fresh
 
 # ── apply ────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--limit", default=15, help="Max applications this session")
+@click.option("--limit", default=None, type=int, help="Max applications this session (overrides config)")
 @click.option("--dry-run", is_flag=True, help="Walk through apply flow without submitting")
 @click.option("-k", "--keywords", default=None, help="Search keywords (overrides config)")
 @click.option("-l", "--location", default=None, help="Location (overrides config)")
 @click.option("--freshness", default=None, help="How fresh: past-hour, past-3h, past-6h, past-24h, past-week")
 @click.option("--all-jobs", is_flag=True, help="Include non-Easy Apply jobs (auto-handles Workday, etc.)")
 @click.pass_context
-def apply(ctx: click.Context, limit: int, dry_run: bool, keywords: str | None, location: str | None, freshness: str | None, all_jobs: bool) -> None:
+def apply(ctx: click.Context, limit: int | None, dry_run: bool, keywords: str | None, location: str | None, freshness: str | None, all_jobs: bool) -> None:
     """Search for jobs and auto-apply.
 
     By default, only Easy Apply jobs are targeted. Use --all-jobs to also
@@ -491,7 +491,8 @@ def apply(ctx: click.Context, limit: int, dry_run: bool, keywords: str | None, l
     if all_jobs:
         cfg.search.easy_apply_only = False
 
-    asyncio.run(run_apply(cfg, limit=limit, dry_run=dry_run))
+    effective_limit = limit if limit is not None else cfg.apply.limit
+    asyncio.run(run_apply(cfg, limit=effective_limit, dry_run=dry_run))
 
 
 # ── status ───────────────────────────────────────────────────────────

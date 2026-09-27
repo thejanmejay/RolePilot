@@ -88,8 +88,14 @@ def build_search_url(search: SearchConfig, start: int = 0) -> str:
         if val:
             params["f_TPR"] = val
 
-    if search.experience_level and search.experience_level in EXPERIENCE_LEVEL_MAP:
-        params["f_E"] = EXPERIENCE_LEVEL_MAP[search.experience_level]
+    if search.experience_level:
+        levels = [
+            EXPERIENCE_LEVEL_MAP[lvl.strip()]
+            for lvl in search.experience_level.split(",")
+            if lvl.strip() in EXPERIENCE_LEVEL_MAP
+        ]
+        if levels:
+            params["f_E"] = ",".join(levels)
 
     if search.job_type and search.job_type in JOB_TYPE_MAP:
         params["f_JT"] = JOB_TYPE_MAP[search.job_type]
