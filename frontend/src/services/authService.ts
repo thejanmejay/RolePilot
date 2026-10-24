@@ -91,6 +91,14 @@ export const authService = {
         };
       }
 
+      // If user already exists, Supabase returns empty identities array under email enumeration protection
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        return {
+          success: false,
+          error: 'An account with this email address already exists. Please log in with your password, or use Forgot Password to reset it.',
+        };
+      }
+
       // If email confirmation is enabled (standard OTP signup flow)
       const isConfirmed = !!data.user?.email_confirmed_at;
       if (!isConfirmed) {
