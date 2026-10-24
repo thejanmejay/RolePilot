@@ -1,5 +1,5 @@
 /**
- * Authentication service for LinkedIn Hunter V2.
+ * Authentication service for RolePilot.
  * Complete Supabase Auth integration supporting:
  * - Email & Password signup with numeric OTP verification
  * - Resend OTP with cooldown support
@@ -10,6 +10,7 @@
  */
 
 import { createClient, SupabaseClient, type Session, type User } from '@supabase/supabase-js';
+import { apiClient } from '../api/client';
 
 // Read Vite environment variables
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || 'https://jgswscubkoevjmyorrha.supabase.co').trim();
@@ -76,6 +77,7 @@ export const authService = {
         email: params.email.trim(),
         password: params.password,
         options: {
+          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
           data: {
             first_name: firstName,
             last_name: lastName,
@@ -99,7 +101,7 @@ export const authService = {
         };
       }
 
-      // If email confirmation is enabled (standard OTP signup flow)
+      // If email confirmation is enabled (link-based confirmation flow)
       const isConfirmed = !!data.user?.email_confirmed_at;
       if (!isConfirmed) {
         return {
@@ -107,7 +109,7 @@ export const authService = {
           requiresEmailVerification: true,
           email: params.email.trim(),
           user: data.user,
-          message: 'Account created! A one-time verification code has been sent to your email.',
+          message: "Account created! We've sent a verification link to your email address.",
         };
       }
 
@@ -127,7 +129,7 @@ export const authService = {
         requiresEmailVerification: true,
         email: params.email.trim(),
         user: data.user,
-        message: 'Account created. Please verify your email with the code provided.',
+        message: "Account created! We've sent a verification link to your email address.",
       };
     } catch (err: any) {
       return {
@@ -204,9 +206,9 @@ export const authService = {
   },
 
   /**
-   * Resend verification OTP code to email.
+   * Resend confirmation email link to candidate's email address.
    */
-  async resendOtp(params: {
+  async resendVerificationEmail(params: {
     email: string;
     type?: 'signup' | 'email_change';
   }): Promise<{ success: boolean; message?: string; error?: string }> {
@@ -221,6 +223,9 @@ export const authService = {
       const { error } = await supabase.auth.resend({
         type: params.type || 'signup',
         email: params.email.trim(),
+        options: {
+          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+        },
       });
 
       if (error) {
@@ -232,14 +237,24 @@ export const authService = {
 
       return {
         success: true,
-        message: `A new verification code has been sent to ${params.email}.`,
+        message: `A new verification link has been sent to ${params.email}.`,
       };
     } catch (err: any) {
       return {
         success: false,
-        error: err.message || 'Failed to resend verification code.',
+        error: err.message || 'Failed to resend verification email.',
       };
     }
+  },
+
+  /**
+   * Backward-compatible alias for resendVerificationEmail.
+   */
+  async resendOtp(params: {
+    email: string;
+    type?: 'signup' | 'email_change';
+  }): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.resendVerificationEmail(params);
   },
 
   /**
@@ -299,11 +314,24 @@ export const authService = {
       if (error) {
         // Check if unconfirmed email error
         if (error.message.toLowerCase().includes('email not confirmed')) {
+          // Trigger a fresh verification email dispatch
+          try {
+            await supabase.auth.resend({
+              type: 'signup',
+              email: params.email.trim(),
+              options: {
+                emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+              },
+            });
+          } catch (resendErr) {
+            console.warn('Auto resend verification email attempt on unconfirmed sign in:', resendErr);
+          }
+
           return {
             success: false,
             requiresEmailVerification: true,
             email: params.email.trim(),
-            error: 'Your email address is not verified yet. Please enter the verification code sent to your inbox.',
+            error: "Your email address is not verified yet. We've sent a verification link to your email address.",
           };
         }
 
@@ -313,14 +341,26 @@ export const authService = {
         };
       }
 
-      // Check if user has confirmed email
+      // Check authoritative email confirmation status
       if (data.user && !data.user.email_confirmed_at) {
+        try {
+          await supabase.auth.resend({
+            type: 'signup',
+            email: params.email.trim(),
+            options: {
+              emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+            },
+          });
+        } catch {
+          // Ignore rate limit or background error
+        }
+
         return {
           success: false,
           requiresEmailVerification: true,
           email: params.email.trim(),
           user: data.user,
-          error: 'Your email is not verified yet. Please enter the verification code.',
+          error: "Your email is not verified yet. We've sent a verification link to your email address.",
         };
       }
 
@@ -431,6 +471,11 @@ export const authService = {
     } catch {
       return { session: null, user: null };
     }
+  },
+
+  /** Permanently delete the authenticated account through the trusted backend. */
+  async deleteAccount(): Promise<void> {
+    await apiClient.delete<void>('/api/v1/account');
   },
 
   /**

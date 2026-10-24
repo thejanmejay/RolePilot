@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
+import { RolePilotLogo } from '../common/RolePilotLogo';
 import './auth.css';
 
 interface AuthLayoutProps {
@@ -36,11 +37,9 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
               onNavigateHome();
             }
           }}
-          aria-label="LinkedIn Hunter Home"
+          aria-label="RolePilot Home"
         >
-          <div className="auth-logo-badge">in</div>
-          <span className="auth-brand-name">LinkedIn Hunter</span>
-          <span className="auth-brand-pill">Pro</span>
+          <RolePilotLogo variant="compact" height={36} alt="RolePilot — Your Career. Your Next Move." />
         </div>
 
         <button
@@ -89,7 +88,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
           <button type="button" onClick={onNavigateHome}>Status</button>
         </div>
         <div>
-          © {new Date().getFullYear()} LinkedIn Hunter V2. All rights reserved.
+          © {new Date().getFullYear()} RolePilot. All rights reserved.
         </div>
       </footer>
     </div>

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     SUPABASE_JWKS_URL: str = Field(default="", validation_alias="SUPABASE_JWKS_URL")
     FRONTEND_ORIGIN: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_ORIGIN")
     
+    # Platform Policy and Terms Consent Configuration
+    ACTIVE_POLICY_VERSION: str = Field(default="draft-1", validation_alias="ACTIVE_POLICY_VERSION")
+    ACTIVE_POLICY_TYPE: str = Field(default="platform_terms", validation_alias="ACTIVE_POLICY_TYPE")
+    ENFORCE_POLICY_ACCEPTANCE: bool = Field(default=True, validation_alias="ENFORCE_POLICY_ACCEPTANCE")
+    
     # Database Configuration (PostgreSQL / Supabase)
     DATABASE_URL: str = Field(
         default="postgresql+psycopg://postgres:postgres@localhost:5432/postgres",

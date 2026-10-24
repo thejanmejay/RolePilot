@@ -15,9 +15,13 @@ import {
   Shield,
   Database,
   ChevronDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../Modal';
+import { RolePilotLogo } from '../common/RolePilotLogo';
+import { authService } from '../../services/authService';
+import { formatErrorMessage } from '../../api/client';
 
 export type TabType = 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation';
 
@@ -35,7 +39,29 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const { email, isAuthenticated, logout } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmation !== 'DELETE' || isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    setDeleteAccountError(null);
+    try {
+      await authService.deleteAccount();
+      await logout();
+      setIsDeleteAccountOpen(false);
+      setIsSettingsOpen(false);
+      window.history.pushState(null, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    } catch (error) {
+      setDeleteAccountError(formatErrorMessage(error));
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
 
   const navItems = [
     { id: 'dashboard' as TabType, label: 'Dashboard', icon: LayoutDashboard },
@@ -71,15 +97,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <div className="sidebar-brand">
           <div
             onClick={() => handleTabClick('dashboard')}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+            style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+            aria-label="RolePilot Dashboard"
           >
-            <div className="brand-logo-badge" style={{ backgroundColor: '#0A66C2', color: '#ffffff' }}>in</div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="brand-title">JobHunter</span>
-                <span className="brand-pill" style={{ backgroundColor: 'rgba(233, 154, 50, 0.25)', color: 'var(--amber-primary)', border: '1px solid rgba(233, 154, 50, 0.5)' }}>PRO</span>
-              </div>
-            </div>
+            <RolePilotLogo variant="compact" height={36} alt="RolePilot — Your Career. Your Next Move." />
           </div>
 
           {/* Mobile Close X Button */}
@@ -281,6 +302,24 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
 
           {/* Quick Actions */}
+          {isAuthenticated && (
+            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '16px' }}>
+              <button
+                onClick={() => {
+                  setDeleteAccountError(null);
+                  setDeleteConfirmation('');
+                  setIsDeleteAccountOpen(true);
+                }}
+                className="btn btn-outline"
+                style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              >
+                <AlertTriangle size={15} />
+                <span>Delete Account</span>
+              </button>
+            </div>
+          )}
+
+          {/* Quick Actions */}
           <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
             {isAuthenticated && (
               <button
@@ -302,6 +341,56 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               className="btn btn-primary"
             >
               Done
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isDeleteAccountOpen}
+        onClose={() => {
+          if (isDeletingAccount) return;
+          setIsDeleteAccountOpen(false);
+          setDeleteAccountError(null);
+        }}
+        title="Delete Account Permanently?"
+        maxWidth="520px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <p style={{ margin: 0, color: 'var(--text-main)', lineHeight: 1.6 }}>
+            This permanently deletes your RolePilot profile, resumes and uploaded files, search settings,
+            applications, automation history, policy acceptance records, and account login. This action
+            cannot be undone. You can register again with this email after deletion completes.
+          </p>
+          <label htmlFor="delete-account-confirmation" style={{ fontSize: '0.9rem', fontWeight: 600 }}>
+            Type <strong>DELETE</strong> to confirm
+          </label>
+          <input
+            id="delete-account-confirmation"
+            value={deleteConfirmation}
+            onChange={(event) => setDeleteConfirmation(event.target.value)}
+            autoComplete="off"
+            disabled={isDeletingAccount}
+            className="form-input"
+          />
+          {deleteAccountError && (
+            <p role="alert" style={{ color: 'var(--danger)', margin: 0 }}>{deleteAccountError}</p>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <button
+              onClick={() => setIsDeleteAccountOpen(false)}
+              disabled={isDeletingAccount}
+              className="btn btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteAccount}
+              disabled={deleteConfirmation !== 'DELETE' || isDeletingAccount}
+              className="btn btn-primary"
+              style={{ backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
+            >
+              {isDeletingAccount ? 'Deleting…' : 'Permanently Delete Account'}
             </button>
           </div>
         </div>

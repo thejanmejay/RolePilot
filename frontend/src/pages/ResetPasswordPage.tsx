@@ -60,7 +60,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
   return (
     <AuthLayout
       title="Create new password"
-      subtitle="Choose a strong, secure password for your LinkedIn Hunter account"
+      subtitle="Choose a strong, secure password for your RolePilot account"
       footerText="Remembered your password?"
       footerActionText="Log in"
       onFooterAction={onNavigateLogin}

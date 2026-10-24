@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.app.api.policy import require_policy_accepted
 from backend.app.core.security import get_current_user_id
 from backend.app.db.database import get_db
 from backend.app.schemas.search import (
@@ -14,7 +15,11 @@ from backend.app.schemas.search import (
 )
 from backend.app.services.search_service import SearchConfigService
 
-router = APIRouter(prefix="/search-configs", tags=["Search Configs"])
+router = APIRouter(
+    prefix="/search-configs",
+    tags=["Search Configs"],
+    dependencies=[Depends(require_policy_accepted)],
+)
 
 
 @router.get("", response_model=List[SearchConfigResponse])

@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { PolicyProvider, usePolicy } from './context/PolicyContext';
 import { ToastProvider } from './context/ToastContext';
-import { ProfileProvider } from './context/ProfileContext';
+import { ProfileProvider, useProfile } from './context/ProfileContext';
 import { AppLayout, type TabType } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -15,7 +16,10 @@ import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { PolicyAcceptancePage } from './pages/PolicyAcceptancePage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { Loader2 } from 'lucide-react';
+import { resolvePostAuthRoute } from './utils/postAuthRoute';
 
 function normalizePath(path: string): string {
   const clean = path.replace(/\/+$/, '') || '/';
@@ -23,7 +27,18 @@ function normalizePath(path: string): string {
 }
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const { hasAcceptedPolicy, isCheckingPolicy } = usePolicy();
+  const { isOnboardingCompleted, isLoading: isProfileLoading } = useProfile();
+  const postAuthRoute = resolvePostAuthRoute({
+    isAuthLoading,
+    isAuthenticated,
+    isPolicyLoading: isCheckingPolicy,
+    hasAcceptedPolicy,
+    isProfileLoading,
+    onboardingCompleted: isOnboardingCompleted,
+  });
+
   const [currentPath, setCurrentPath] = useState<string>(() =>
     normalizePath(window.location.pathname)
   );
@@ -41,14 +56,20 @@ function AppContent() {
   const [targetApplicationId, setTargetApplicationId] = useState<string | null>(null);
 
   // Sync browser URL history
-  const navigate = (path: string) => {
+  const navigate = useCallback((path: string) => {
     const normalized = normalizePath(path);
     if (window.location.pathname !== normalized) {
       window.history.pushState(null, '', normalized);
     }
     setCurrentPath(normalized);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
+
+  const routeUserAfterAuth = useCallback(() => {
+    // Leave callback/login screens; the render gates below wait for the
+    // restored session, policy result, and profile before choosing a destination.
+    navigate('/');
+  }, [navigate]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -65,6 +86,23 @@ function AppContent() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // Enforce onboarding flow transitions for authenticated users
+  useEffect(() => {
+    if (postAuthRoute === 'onboarding' && currentPath !== '/onboarding') {
+      navigate('/onboarding');
+    } else if (
+      postAuthRoute === 'dashboard' &&
+      ['/login', '/signup', '/verify-email', '/auth/callback', '/onboarding', '/'].includes(currentPath)
+    ) {
+      setCurrentTab('dashboard');
+      navigate('/dashboard');
+    }
+  }, [
+    postAuthRoute,
+    currentPath,
+    navigate,
+  ]);
 
   const handleTabChange = (tab: TabType) => {
     setCurrentTab(tab);
@@ -83,8 +121,8 @@ function AppContent() {
     navigate('/applications');
   };
 
-  // Avoid flashing while restoring Supabase session on initial load
-  if (isLoading) {
+  // 1. Initial auth restoration loader
+  if (postAuthRoute === 'auth-loading') {
     return (
       <div
         style={{
@@ -98,41 +136,37 @@ function AppContent() {
           color: '#64748B',
         }}
       >
-        <Loader2 size={32} className="spin-animation" style={{ color: '#0A66C2' }} />
-        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Connecting to LinkedIn Hunter...</span>
+        <Loader2 size={32} className="spin-animation" style={{ color: '#1769E8' }} />
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Connecting to RolePilot...</span>
       </div>
     );
   }
 
-  // 1. Explicit /auth/callback route (OAuth & Email link redirects)
+  // 2. Explicit /auth/callback route (OAuth & Email link redirects)
   if (currentPath === '/auth/callback') {
     return (
       <AuthCallbackPage
-        onNavigateDashboard={() => {
-          navigate('/dashboard');
-          setCurrentTab('dashboard');
-        }}
+        onSuccess={routeUserAfterAuth}
         onNavigateLogin={() => navigate('/login')}
+        onNavigateVerifyEmail={(em) => navigate(`/verify-email?email=${encodeURIComponent(em)}`)}
       />
     );
   }
 
-  // 2. Explicit /verify-email route (Email OTP confirmation)
+  // 3. Explicit /verify-email route (Link-based email verification check screen)
   if (currentPath === '/verify-email') {
     return (
       <VerifyEmailPage
+        initialEmail={user?.email || undefined}
+        onSuccess={routeUserAfterAuth}
         onNavigateLogin={() => navigate('/login')}
         onNavigateSignup={() => navigate('/signup')}
         onNavigateHome={() => navigate('/')}
-        onNavigateDashboard={() => {
-          navigate('/dashboard');
-          setCurrentTab('dashboard');
-        }}
       />
     );
   }
 
-  // 3. Explicit /forgot-password route
+  // 4. Explicit /forgot-password route
   if (currentPath === '/forgot-password') {
     return (
       <ForgotPasswordPage
@@ -142,7 +176,7 @@ function AppContent() {
     );
   }
 
-  // 4. Explicit /reset-password route
+  // 5. Explicit /reset-password route
   if (currentPath === '/reset-password') {
     return (
       <ResetPasswordPage
@@ -152,33 +186,49 @@ function AppContent() {
     );
   }
 
-  // 5. Explicit /signup route
-  if (currentPath === '/signup') {
-    return (
-      <SignupPage
-        onNavigateLogin={() => navigate('/login')}
-        onNavigateHome={() => navigate('/')}
-        onNavigateDashboard={() => {
-          navigate('/dashboard');
-          setCurrentTab('dashboard');
-        }}
-        onNavigateVerifyEmail={(email) => {
-          navigate(`/verify-email?email=${encodeURIComponent(email)}`);
-        }}
-      />
-    );
-  }
+  // 6. Unauthenticated handling
+  if (!isAuthenticated) {
+    // If user has an unverified session, ensure they remain in verification flow
+    if (user && !user.email_confirmed_at) {
+      return (
+        <VerifyEmailPage
+          initialEmail={user.email || undefined}
+          onSuccess={routeUserAfterAuth}
+          onNavigateLogin={() => navigate('/login')}
+          onNavigateSignup={() => navigate('/signup')}
+          onNavigateHome={() => navigate('/')}
+        />
+      );
+    }
 
-  // 6. Explicit /login route
-  if (currentPath === '/login') {
+    if (currentPath === '/signup') {
+      return (
+        <SignupPage
+          onSuccess={routeUserAfterAuth}
+          onNavigateLogin={() => navigate('/login')}
+          onNavigateHome={() => navigate('/')}
+          onNavigateVerifyEmail={(email) => {
+            navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+          }}
+        />
+      );
+    }
+
+    if (currentPath === '/') {
+      return (
+        <LandingPage
+          onNavigateSignup={() => navigate('/signup')}
+          onNavigateLogin={() => navigate('/login')}
+        />
+      );
+    }
+
+    // Default to Login for protected routes when logged out
     return (
       <LoginPage
+        onSuccess={routeUserAfterAuth}
         onNavigateSignup={() => navigate('/signup')}
         onNavigateHome={() => navigate('/')}
-        onNavigateDashboard={() => {
-          navigate('/dashboard');
-          setCurrentTab('dashboard');
-        }}
         onNavigateForgotPassword={() => navigate('/forgot-password')}
         onNavigateVerifyEmail={(email) => {
           navigate(`/verify-email?email=${encodeURIComponent(email)}`);
@@ -187,35 +237,63 @@ function AppContent() {
     );
   }
 
-  // 7. Pre-signup Landing Page (Route '/' when not authenticated)
-  if (currentPath === '/' && !isAuthenticated) {
+  // 7. Authenticated user: Check mandatory platform policy acceptance
+  if (postAuthRoute === 'policy-loading') {
     return (
-      <LandingPage
-        onNavigateSignup={() => navigate('/signup')}
-        onNavigateLogin={() => navigate('/login')}
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          backgroundColor: '#F8FAFC',
+          color: '#64748B',
+        }}
+      >
+        <Loader2 size={32} className="spin-animation" style={{ color: '#1769E8' }} />
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Verifying platform permissions...</span>
+      </div>
+    );
+  }
+
+  if (postAuthRoute === 'policy') {
+    return <PolicyAcceptancePage onContinue={routeUserAfterAuth} />;
+  }
+
+  // 8. Authenticated user: Candidate Profile Onboarding & Loading Check
+  if (postAuthRoute === 'profile-loading') {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          backgroundColor: '#F8FAFC',
+          color: '#64748B',
+        }}
+      >
+        <Loader2 size={32} className="spin-animation" style={{ color: '#1769E8' }} />
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Loading profile status...</span>
+      </div>
+    );
+  }
+
+  // 9. Authenticated user: Mandatory initial profile onboarding
+  if (postAuthRoute === 'onboarding' || currentPath === '/onboarding') {
+    return (
+      <OnboardingPage
+        onSuccess={routeUserAfterAuth}
+        onSignOut={() => navigate('/login')}
       />
     );
   }
 
-  // 8. Unauthenticated access to protected routes -> Redirect to Login
-  if (!isAuthenticated && currentPath !== '/') {
-    return (
-      <LoginPage
-        onNavigateSignup={() => navigate('/signup')}
-        onNavigateHome={() => navigate('/')}
-        onNavigateDashboard={() => {
-          navigate('/dashboard');
-          setCurrentTab('dashboard');
-        }}
-        onNavigateForgotPassword={() => navigate('/forgot-password')}
-        onNavigateVerifyEmail={(email) => {
-          navigate(`/verify-email?email=${encodeURIComponent(email)}`);
-        }}
-      />
-    );
-  }
-
-  // 9. Authenticated state on '/' or '/dashboard', '/profile', etc.
+  // 10. Main Application Dashboard & Management Tabs
   return (
     <AppLayout currentTab={currentTab} onTabChange={handleTabChange}>
       {currentTab === 'dashboard' && (
@@ -255,11 +333,13 @@ function AppContent() {
 export function App() {
   return (
     <AuthProvider>
-      <ToastProvider>
-        <ProfileProvider>
-          <AppContent />
-        </ProfileProvider>
-      </ToastProvider>
+      <PolicyProvider>
+        <ToastProvider>
+          <ProfileProvider>
+            <AppContent />
+          </ProfileProvider>
+        </ToastProvider>
+      </PolicyProvider>
     </AuthProvider>
   );
 }

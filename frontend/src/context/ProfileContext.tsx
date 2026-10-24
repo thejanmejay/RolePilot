@@ -4,6 +4,7 @@ import type { SearchConfig } from '../types/job';
 import { profileApi } from '../api/profile';
 import { jobsApi } from '../api/jobs';
 import { useAuth } from './AuthContext';
+import { usePolicy } from './PolicyContext';
 import { formatErrorMessage } from '../api/client';
 import { calculateApplicationReadiness, type ApplicationReadiness } from '../utils/readiness';
 
@@ -14,8 +15,10 @@ interface ProfileContextType {
   readiness: ApplicationReadiness;
   isLoading: boolean;
   isRefreshing: boolean;
+  isOnboardingCompleted: boolean;
   error: string | null;
   refreshProfile: (silent?: boolean) => Promise<void>;
+  completeOnboarding: (data: import('../types/profile').OnboardingData) => Promise<Profile>;
   updateProfileState: (updated: Partial<Profile> | Profile) => void;
   setResumes: React.Dispatch<React.SetStateAction<Resume[]>>;
   setSearchConfigs: React.Dispatch<React.SetStateAction<SearchConfig[]>>;
@@ -25,6 +28,7 @@ const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
 export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
+  const { hasAcceptedPolicy } = usePolicy();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [resumes, setResumes] = useState<Resume[]>([]);
@@ -36,7 +40,15 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const refreshProfile = useCallback(
     async (silent = false) => {
-      if (!isAuthenticated) {
+      // These APIs are guarded by the backend until the active policy is accepted.
+      // Wait for the status check so initial session restoration does not issue
+      // requests that are expected to fail with 403.
+      if (!isAuthenticated || hasAcceptedPolicy !== true) {
+        if (!isAuthenticated || hasAcceptedPolicy === false) {
+          setProfile(null);
+          setResumes([]);
+          setSearchConfigs([]);
+        }
         setIsLoading(false);
         return;
       }
@@ -64,23 +76,42 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setIsRefreshing(false);
       }
     },
-    [isAuthenticated]
+    [isAuthenticated, hasAcceptedPolicy]
   );
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && hasAcceptedPolicy === true) {
       refreshProfile(false);
     } else {
-      setProfile(null);
-      setResumes([]);
-      setSearchConfigs([]);
-      setIsLoading(false);
+      if (!isAuthenticated || hasAcceptedPolicy === false) {
+        setProfile(null);
+        setResumes([]);
+        setSearchConfigs([]);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+      }
     }
-  }, [isAuthenticated, refreshProfile]);
+  }, [isAuthenticated, hasAcceptedPolicy, refreshProfile]);
 
   const updateProfileState = useCallback((updated: Partial<Profile> | Profile) => {
     setProfile((prev) => (prev ? { ...prev, ...updated } : (updated as Profile)));
   }, []);
+
+  const completeOnboarding = useCallback(
+    async (data: import('../types/profile').OnboardingData): Promise<Profile> => {
+      const updatedProfile = await profileApi.completeOnboarding(data);
+      setProfile(updatedProfile);
+      // Silently refresh searchConfigs in case a default search config was initialized
+      jobsApi.getSearchConfigs().then(setSearchConfigs).catch(() => {});
+      return updatedProfile;
+    },
+    []
+  );
+
+  const isOnboardingCompleted = useMemo(() => {
+    return Boolean(profile?.onboarding_completed);
+  }, [profile?.onboarding_completed]);
 
   const readiness = useMemo(() => {
     return calculateApplicationReadiness(profile, resumes, searchConfigs);
@@ -94,8 +125,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
       readiness,
       isLoading,
       isRefreshing,
+      isOnboardingCompleted,
       error,
       refreshProfile,
+      completeOnboarding,
       updateProfileState,
       setResumes,
       setSearchConfigs,
@@ -107,8 +140,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
       readiness,
       isLoading,
       isRefreshing,
+      isOnboardingCompleted,
       error,
       refreshProfile,
+      completeOnboarding,
       updateProfileState,
     ]
   );

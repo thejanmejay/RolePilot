@@ -5,12 +5,17 @@ from typing import List
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from backend.app.api.policy import require_policy_accepted
 from backend.app.core.security import get_current_user_id
 from backend.app.db.database import get_db
 from backend.app.schemas.resume import ResumeResponse
 from backend.app.services.resume_service import ResumeService
 
-router = APIRouter(prefix="/resumes", tags=["Resumes"])
+router = APIRouter(
+    prefix="/resumes",
+    tags=["Resumes"],
+    dependencies=[Depends(require_policy_accepted)],
+)
 
 
 @router.post("/upload", response_model=ResumeResponse, status_code=status.HTTP_201_CREATED)

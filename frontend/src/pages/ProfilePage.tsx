@@ -152,7 +152,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigateTab }) => {
             Profile & Automation Readiness
           </h1>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Source-of-truth configuration layer for LinkedIn Hunter automated application submissions.
+            Source-of-truth configuration layer for RolePilot automated application submissions.
           </p>
         </div>
 

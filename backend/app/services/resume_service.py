@@ -106,7 +106,7 @@ class ResumeService:
         supabase = get_supabase_client()
         if supabase:
             try:
-                supabase.storage.from_("resumes").upload(
+                supabase.storage.from_(settings.RESUME_STORAGE_BUCKET).upload(
                     path=storage_path,
                     file=content,
                     file_options={"content-type": "application/pdf"},
@@ -114,15 +114,10 @@ class ResumeService:
             except Exception:
                 pass
 
-        # Parse PDF text
-        parsed_text = ""
-        parsed_data = {}
-        try:
-            parsed_text = extract_text_from_pdf_bytes(content)
-            parsed_data = parse_resume_structure(parsed_text)
-        except Exception:
-            parsed_text = ""
-            parsed_data = {"error": "Failed to parse PDF text content"}
+        # Structured Candidate Onboarding: Uploading a PDF does not invoke resume parsing
+        # or extract profile information. Candidate data comes exclusively from direct structured inputs.
+        parsed_text = None
+        parsed_data = None
 
         # Deactivate previous active resumes for this user
         db.execute(
@@ -175,7 +170,7 @@ class ResumeService:
         supabase = get_supabase_client()
         if supabase and resume.storage_path:
             try:
-                supabase.storage.from_("resumes").remove([resume.storage_path])
+                supabase.storage.from_(settings.RESUME_STORAGE_BUCKET).remove([resume.storage_path])
             except Exception:
                 pass
 

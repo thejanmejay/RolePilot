@@ -265,7 +265,7 @@ export const SkillsSection: React.FC<SkillsSectionProps> = ({ skills, onSkillsCh
             <Award size={40} className="empty-state-icon" />
             <p className="empty-state-text">No skills added yet.</p>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-subtle)', marginBottom: '16px' }}>
-              Add your core skills (e.g. Selenium, Java, SQL, Playwright, API Testing) to enable the LinkedIn Hunter automation engine to answer job questions accurately.
+              Add your core skills (e.g. Selenium, Java, SQL, Playwright, API Testing) to enable the RolePilot automation engine to answer job questions accurately.
             </p>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
               <button onClick={() => openSingleModal()} className="btn btn-primary">

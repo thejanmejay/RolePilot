@@ -78,6 +78,7 @@ export interface Profile {
   state?: string | null;
   country?: string | null;
   headline?: string | null;
+  target_role?: string | null;
   about?: string | null;
   linkedin_url?: string | null;
   github_url?: string | null;
@@ -89,6 +90,8 @@ export interface Profile {
   expected_ctc?: number | null;
   authorized_to_work?: boolean | null;
   willing_to_relocate?: boolean | null;
+  onboarding_completed?: boolean;
+  onboarding_completed_at?: string | null;
   skills: Skill[];
   experiences: Experience[];
   educations?: Education[];
@@ -116,6 +119,8 @@ export interface ProfileUpdate {
   city?: string | null;
   state?: string | null;
   country?: string | null;
+  headline?: string | null;
+  target_role?: string | null;
   linkedin_url?: string | null;
   github_url?: string | null;
   website_url?: string | null;
@@ -126,4 +131,18 @@ export interface ProfileUpdate {
   expected_ctc?: number | null;
   authorized_to_work?: boolean | null;
   willing_to_relocate?: boolean | null;
+  onboarding_completed?: boolean;
 }
+
+export interface OnboardingData {
+  full_name?: string;
+  first_name?: string;
+  last_name?: string;
+  headline: string;
+  target_role: string;
+  experience_years: number;
+  city?: string;
+  country?: string;
+  phone?: string;
+}
+

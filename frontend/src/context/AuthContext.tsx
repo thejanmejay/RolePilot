@@ -74,27 +74,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-        setSession(data.session);
-        setUser(data.session.user);
-        const accessToken = data.session.access_token;
-        setToken(accessToken);
-        setEmail(data.session.user?.email || parseJwtEmail(accessToken));
-        localStorage.setItem('supabase_access_token', accessToken);
-      } else {
-        // Keep existing token if valid in localStorage (e.g. dev token)
-        const saved = localStorage.getItem('supabase_access_token');
-        if (saved) {
-          setToken(saved);
-          setEmail(parseJwtEmail(saved));
-        } else {
-          setToken(null);
-          setEmail(null);
-          setUser(null);
-          setSession(null);
+        // Fetch authoritative server state using getUser() to avoid stale JWT flags
+        let currentUser = data.session.user;
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData?.user) {
+            currentUser = userData.user;
+          }
+        } catch {
+          // Fallback to session user
         }
+
+        setSession(data.session);
+        setUser(currentUser);
+
+        const isConfirmed = !currentUser || !!currentUser.email_confirmed_at;
+        if (isConfirmed) {
+          const accessToken = data.session.access_token;
+          setToken(accessToken);
+          setEmail(currentUser?.email || parseJwtEmail(accessToken));
+          localStorage.setItem('supabase_access_token', accessToken);
+        } else {
+          // Unconfirmed account: block access to protected application features
+          setToken(null);
+          setEmail(currentUser?.email || null);
+          localStorage.removeItem('supabase_access_token');
+        }
+      } else {
+        localStorage.removeItem('supabase_access_token');
+        setToken(null);
+        setEmail(null);
+        setUser(null);
+        setSession(null);
       }
     } catch (err) {
       console.warn('Session restoration failed:', err);
+      setToken(null);
+      setEmail(null);
+      setUser(null);
+      setSession(null);
+      localStorage.removeItem('supabase_access_token');
     } finally {
       setIsLoading(false);
     }
@@ -108,13 +127,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (supabase) {
       const { data: authListener } = supabase.auth.onAuthStateChange(
         async (event, currentSession) => {
-          if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
             if (currentSession?.access_token) {
+              const currentUser = currentSession.user;
+              const isConfirmed = !currentUser || !!currentUser.email_confirmed_at;
               setSession(currentSession);
-              setUser(currentSession.user);
-              setToken(currentSession.access_token);
-              setEmail(currentSession.user?.email || parseJwtEmail(currentSession.access_token));
-              localStorage.setItem('supabase_access_token', currentSession.access_token);
+              setUser(currentUser);
+
+              if (isConfirmed) {
+                setToken(currentSession.access_token);
+                setEmail(currentUser?.email || parseJwtEmail(currentSession.access_token));
+                localStorage.setItem('supabase_access_token', currentSession.access_token);
+              } else {
+                setToken(null);
+                setEmail(currentUser?.email || null);
+                localStorage.removeItem('supabase_access_token');
+              }
             }
           } else if (event === 'SIGNED_OUT') {
             localStorage.removeItem('supabase_access_token');

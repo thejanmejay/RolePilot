@@ -12,6 +12,7 @@ from backend.app.db.models.profile import Profile
 from backend.app.db.models.resume import Resume
 from backend.app.db.models.search_config import SearchConfig
 from backend.app.db.models.skill import Skill
+from backend.app.db.models.policy_acceptance import UserPolicyAcceptance
 
 __all__ = [
     "Profile",
@@ -26,4 +27,5 @@ __all__ = [
     "AutomationLog",
     "Application",
     "ApplicationAnswer",
+    "UserPolicyAcceptance",
 ]

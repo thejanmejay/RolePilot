@@ -13,6 +13,10 @@ export const profileApi = {
   /** Retrieve authenticated user's profile with skills and experiences */
   getProfile: () => apiClient.get<Profile>('/api/v1/profile'),
 
+  /** Complete initial candidate profile onboarding */
+  completeOnboarding: (data: import('../types/profile').OnboardingData) =>
+    apiClient.post<Profile>('/api/v1/profile/onboarding', data),
+
   /** Update profile fields */
   updateProfile: (data: ProfileUpdate) =>
     apiClient.patch<Profile>('/api/v1/profile', data),
@@ -33,9 +37,17 @@ export const profileApi = {
   addExperience: (exp: ExperienceCreate) =>
     apiClient.post<Experience>('/api/v1/profile/experiences', exp),
 
+  /** Update an existing work experience */
+  updateExperience: (expId: string, exp: ExperienceCreate) =>
+    apiClient.put<Experience>(`/api/v1/profile/experiences/${expId}`, exp),
+
   /** Delete a work experience */
   deleteExperience: (expId: string) =>
     apiClient.delete<void>(`/api/v1/profile/experiences/${expId}`),
+
+  /** Finalize structured onboarding enforcing all 4 required sections */
+  finalizeOnboarding: () =>
+    apiClient.post<Profile>('/api/v1/profile/onboarding/finalize', {}),
 
   /** Add an education record */
   addEducation: (edu: import('../types/profile').EducationCreate) =>

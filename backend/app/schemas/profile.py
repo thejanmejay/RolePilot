@@ -97,6 +97,8 @@ class ProfileBase(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     website_url: Optional[str] = None
+    headline: Optional[str] = None
+    target_role: Optional[str] = None
     experience_years: Optional[int] = Field(None, ge=0)
     experience_months: Optional[int] = Field(None, ge=0, le=11)
     notice_period_days: Optional[int] = Field(None, ge=0)
@@ -104,6 +106,8 @@ class ProfileBase(BaseModel):
     expected_ctc: Optional[float] = None
     authorized_to_work: Optional[bool] = None
     willing_to_relocate: Optional[bool] = None
+    onboarding_completed: Optional[bool] = False
+    onboarding_completed_at: Optional[datetime] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -117,6 +121,8 @@ class ProfileUpdate(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     website_url: Optional[str] = None
+    headline: Optional[str] = None
+    target_role: Optional[str] = None
     experience_years: Optional[int] = Field(None, ge=0)
     experience_months: Optional[int] = Field(None, ge=0, le=11)
     notice_period_days: Optional[int] = Field(None, ge=0)
@@ -124,6 +130,19 @@ class ProfileUpdate(BaseModel):
     expected_ctc: Optional[float] = None
     authorized_to_work: Optional[bool] = None
     willing_to_relocate: Optional[bool] = None
+    onboarding_completed: Optional[bool] = None
+
+
+class OnboardingRequest(BaseModel):
+    full_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    headline: str = Field(..., min_length=2, max_length=255, description="Professional title or headline")
+    target_role: str = Field(..., min_length=2, max_length=255, description="Primary target role or job search goal")
+    experience_years: int = Field(0, ge=0, description="Total years of experience")
+    city: Optional[str] = Field(None, max_length=100)
+    country: Optional[str] = Field("India", max_length=100)
+    phone: Optional[str] = Field(None, max_length=50)
 
 
 class ProfileResponse(ProfileBase):

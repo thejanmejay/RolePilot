@@ -9,6 +9,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { RolePilotLogo } from './common/RolePilotLogo';
 
 export type TabType = 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation';
 
@@ -55,46 +56,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange }) => {
           {/* Brand Logo & Name */}
           <div
             onClick={() => onTabChange('dashboard')}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flexShrink: 0 }}
+            style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flexShrink: 0 }}
+            aria-label="RolePilot Dashboard"
           >
-            <div
-              style={{
-                backgroundColor: 'var(--primary)',
-                color: '#ffffff',
-                fontWeight: 800,
-                fontSize: '1.15rem',
-                borderRadius: '6px',
-                width: '36px',
-                height: '36px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
-              in
-            </div>
-
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
-                  LinkedIn Hunter
-                </span>
-                <span
-                  style={{
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                  }}
-                >
-                  SaaS v2
-                </span>
-              </div>
-            </div>
+            <RolePilotLogo variant="compact" height={36} alt="RolePilot — Your Career. Your Next Move." />
           </div>
 
           {/* Desktop Navigation Links (Hidden on Mobile <= 768px via CSS) */}
