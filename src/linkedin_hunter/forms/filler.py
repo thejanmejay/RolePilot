@@ -301,6 +301,12 @@ async def _fill_text(
         log.debug("No answer for text field: %s", field.label)
         return not field.required  # OK to skip non-required fields
 
+    # Phone number cleaning (strip country code/spaces if filling standard mobile field)
+    if re.search(r"(phone|mobile|cell|telephone)", field.label, re.IGNORECASE):
+        cleaned_phone = re.sub(r"^\+91\s*", "", answer).replace(" ", "").replace("-", "").replace("(", "").replace(")", "").strip()
+        if cleaned_phone.isdigit() and len(cleaned_phone) >= 10:
+            answer = cleaned_phone[-10:]
+
     await field.element.click()
     await asyncio.sleep(random.uniform(0.1, 0.3))
 
@@ -322,16 +328,30 @@ async def _fill_text(
 
     # Handle typeahead/autocomplete dropdowns (only for city/location-like fields)
     if not is_url_or_fast_field and re.search(r"(city|state|location|address|country|university|school|company)", field.label, re.IGNORECASE):
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.8)
         typeahead_option = await page.query_selector(
-            "div.basic-typeahead__triggered-content li:first-child, "
-            "div.search-typeahead-v2__hit:first-child, "
-            "div[data-test-single-typeahead-entity-form-search-result]:first-child"
+            "div.basic-typeahead__triggered-content li, "
+            "div.search-typeahead-v2__hit, "
+            "div[data-test-single-typeahead-entity-form-search-result], "
+            "div[role='listbox'] [role='option'], "
+            "div[role='option'], "
+            "ul.typeahead-results li"
         )
         if typeahead_option:
-            await typeahead_option.click()
-            log.info("Selected typeahead suggestion for '%s'", field.label)
+            try:
+                await typeahead_option.click(force=True)
+                log.info("Selected typeahead suggestion for '%s'", field.label)
+                await asyncio.sleep(0.3)
+            except Exception:
+                await page.keyboard.press("ArrowDown")
+                await asyncio.sleep(0.2)
+                await page.keyboard.press("Enter")
+        else:
+            await page.keyboard.press("ArrowDown")
             await asyncio.sleep(0.2)
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(0.2)
+            await page.keyboard.press("Tab")
 
     log.info("Filled text field '%s' with '%s'", field.label, answer)
     return True

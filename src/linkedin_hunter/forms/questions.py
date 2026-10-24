@@ -18,8 +18,15 @@ BUILTIN_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)(require|need|will you need).*(sponsor|visa|h-?1b)", "sponsorship_required"),
     # Relocation
     (r"(?i)(willing|open|able).*(relocat|move)", "willing_to_relocate"),
-    # Salary — generic expected only (excluding specific units, current, or in-hand/take-home)
-    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|current|present)).*(expected|desired).*(salary|compensation|pay|ctc)", "desired_salary"),
+    # Current Salary / CTC in LPA
+    (r"(?i)(current|present).*(salary|compensation|pay|ctc).*(\(in lakhs|in lakh|lpa|\blacs?\b)", "_current_salary_lpa"),
+    # Desired / Expected Salary / CTC in LPA
+    (r"(?i)(expected|desired|target).*(salary|compensation|pay|ctc).*(\(in lakhs|in lakh|lpa|\blacs?\b)", "_desired_salary_lpa"),
+    # Current Salary / CTC
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b)).*(current|present).*(salary|compensation|pay|ctc)", "current_salary"),
+    # Desired / Expected Salary / CTC
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b)).*(expected|desired|target).*(salary|compensation|pay|ctc)", "desired_salary"),
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b|current|present)).*(salary|compensation|pay|ctc)", "desired_salary"),
     # How did you hear — multi-language
     (r"(?i)how.*(hear|learn|find).*(about|of|this)", "how_did_you_hear"),
     (r"(?i)c[oó]mo.*(enterar|conocer|supiste|enteraste)", "how_did_you_hear"),  # Spanish
@@ -47,9 +54,9 @@ PROFILE_PATTERNS: list[tuple[str, str]] = [
     # Phone — multi-language
     (r"(?i)(phone|mobile|cell|telephone|telefone|teléfono|téléphone|telefon|telefono|điện thoại|전화|電話)", "phone"),
     (r"(?i)(número.*tel[eé]fono|phone\s*number|mobile\s*number)", "phone"),
-    # Address / City — multi-language
+    # Address / City / Location — multi-language
     (r"(?i)^(address|endereço|dirección|adresse|indirizzo|adres|địa chỉ|주소|住所)$", "city"),
-    (r"(?i)(city|town|cidade|ciudad|ville|stadt|città|thành phố|도시|都市)", "city"),
+    (r"(?i)(city|location|town|cidade|ciudad|ville|stadt|città|thành phố|도시|都市)", "city"),
     (r"(?i)(state|province|estado|provincia|région|bundesland|tỉnh|주|州)", "state"),
     (r"(?i)(country|nation|país|pays|land|paese|quốc gia|국가|国)", "country"),
     # GitHub / Portfolio / Website (checked before generic profile url)
@@ -95,8 +102,10 @@ YES_NO_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)sponsor.*employment.*visa", "sponsorship_required"),
     # Work authorization — generic "authorized/lawfully work" → use config
     (r"(?i)(authorized|lawfully|legally|eligible).*(work|employ)", "authorized_to_work"),
-    # Relocation
-    (r"(?i)(willing|open|able).*(relocat|move)", "willing_to_relocate"),
+    # Relocation & Workplace/Office Readiness
+    (r"(?i)(willing|open|able|ready|comfortable).*(relocat|move)", "willing_to_relocate"),
+    (r"(?i)(open to|willing to|ready to|comfortable to|can you).*(work|relocate|commute|onsite|hybrid|office|in-office)", "willing_to_relocate"),
+    (r"(?i)(work from|based in|open to work in|open to work from).*(office|location|bangalore|bengaluru|noida|gurgaon|gurugram|delhi|hyderabad|mumbai|pune|chennai|remote)", "willing_to_relocate"),
     # Education / Degree completion -> Yes (user holds Bachelor's B.Tech)
     (r"(?i)(have you|did you|do you)?.*(completed|finish|hold|have|possess).*(bachelor|b\.?tech|undergraduate|degree|diploma|graduation)", "_yes"),
     (r"(?i)(completed|finish|hold|possess).*(bachelor|b\.?tech|undergraduate|degree|graduation)", "_yes"),
@@ -275,6 +284,11 @@ def match_answer(
     # 2. Check builtin answer patterns
     for pattern, field_name in BUILTIN_PATTERNS:
         if re.search(pattern, question_text):
+            if field_name == "_current_salary_lpa":
+                return _convert_to_lpa(answers.current_salary)
+            if field_name == "_desired_salary_lpa":
+                return _convert_to_lpa(answers.desired_salary)
+
             value = getattr(answers, field_name, None)
             if value is not None:
                 result = _format_answer(value)
@@ -289,8 +303,31 @@ def match_answer(
                 log.debug("Profile pattern matched: %s -> %s", field_name, value)
                 return str(value)
 
+    # 4. Check if this is a recognized Yes/No question
+    yn = match_yes_no(question_text, answers)
+    if yn is True:
+        log.debug("Yes/No fallback matched Yes for: %s", question_text[:80])
+        return "Yes"
+    if yn is False:
+        log.debug("Yes/No fallback matched No for: %s", question_text[:80])
+        return "No"
+
     log.debug("No pattern matched for question: %s", question_text[:80])
     return None
+
+
+def _convert_to_lpa(val: str) -> str:
+    """Convert an INR salary amount to LPA (Lakhs Per Annum)."""
+    try:
+        clean = re.sub(r"[^\d.]", "", str(val))
+        num = float(clean)
+        if num >= 1000:
+            lpa = num / 100000.0
+            formatted = f"{lpa:.2f}".rstrip("0").rstrip(".")
+            return formatted
+        return str(val)
+    except Exception:
+        return str(val)
 
 
 def match_yes_no(question_text: str, answers: AnswersConfig) -> Optional[bool]:

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import random
 import re
+from typing import Any, Callable, Dict, Optional
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -15,8 +17,8 @@ from linkedin_hunter.browser.humanize import human_delay, short_delay, smooth_sc
 from linkedin_hunter.config import HunterConfig, get_project_root
 from linkedin_hunter.db.models import init_db
 from linkedin_hunter.db.repository import JobRepository, ActivityRepository
-from linkedin_hunter.forms.detector import detect_form_fields
-from linkedin_hunter.forms.filler import fill_form_fields
+from linkedin_hunter.forms.detector import detect_form_fields, FieldType
+from linkedin_hunter.forms.filler import fill_form_fields, _fill_field
 from linkedin_hunter.forms.resume import extract_resume_text
 from linkedin_hunter.jobs.filters import build_search_url
 from linkedin_hunter.jobs.parser import parse_job_cards, JobCard
@@ -35,10 +37,10 @@ APPLY_SELECTORS = {
     # The Easy Apply button in the job detail pane (right side of two-pane view)
     "easy_apply_button": "button.jobs-apply-button",
     # The Easy Apply modal container
-    "modal": "div.jobs-easy-apply-modal, div.jobs-easy-apply-content, div[data-test-modal-id='easy-apply-modal']",
+    "modal": "div.jobs-easy-apply-modal, div.jobs-easy-apply-content, div[data-test-modal-id='easy-apply-modal'], div.artdeco-modal[role='dialog'], div[role='dialog']",
     # Navigation buttons inside the modal footer
-    "next_button": "div.jobs-easy-apply-modal footer button.artdeco-button--primary, div.jobs-easy-apply-content footer button.artdeco-button--primary",
-    "dismiss_button": "button[aria-label='Dismiss'], button.artdeco-modal__dismiss",
+    "next_button": "div.jobs-easy-apply-modal footer button.artdeco-button--primary, div.jobs-easy-apply-content footer button.artdeco-button--primary, div[role='dialog'] footer button.artdeco-button--primary, button[aria-label*='Submit' i], button[aria-label*='Review' i], button[aria-label*='Next' i]",
+    "dismiss_button": "button[aria-label='Dismiss'], button.artdeco-modal__dismiss, button[data-test-modal-close-btn]",
     "error_message": "div.artdeco-inline-feedback--error",
     "follow_checkbox": "label[for='follow-company-checkbox']",
     # Job card in the left-pane list
@@ -342,30 +344,34 @@ async def _is_already_applied_on_page(page) -> bool:
 
 
 async def _click_easy_apply(page) -> bool:
-    """Find and click the Easy Apply button in the job detail pane."""
+    """Find and click the Easy Apply button in the job detail pane or standalone page."""
     try:
-        btn = await page.wait_for_selector(
-            APPLY_SELECTORS["easy_apply_button"],
-            state="visible",
-            timeout=10000,
-        )
-        if btn:
-            # Verify it's actually an Easy Apply button (not a filter button)
-            aria = (await btn.get_attribute("aria-label")) or ""
-            text = ((await btn.text_content()) or "").strip().lower()
-            if "easy apply" in aria.lower() or "easy apply" in text:
-                await btn.click()
-                await asyncio.sleep(1.5)
-                return True
-
-            # If first match wasn't right, try all matches
-            all_btns = await page.query_selector_all(APPLY_SELECTORS["easy_apply_button"])
-            for b in all_btns:
-                a = (await b.get_attribute("aria-label")) or ""
-                if "easy apply" in a.lower():
-                    await b.click()
-                    await asyncio.sleep(1.5)
-                    return True
+        candidate_selectors = [
+            "button:has-text('Easy Apply')",
+            "button[aria-label*='Easy Apply' i]",
+            "button.jobs-apply-button",
+            "div.jobs-apply-button--top-card button",
+            "div.job-details-jobs-unified-top-card__actions-container button",
+            "div.jobs-s-apply button",
+            "button.artdeco-button--primary",
+            "button",
+        ]
+        for sel in candidate_selectors:
+            btns = await page.query_selector_all(sel)
+            for btn in btns:
+                try:
+                    if not await btn.is_visible():
+                        continue
+                    aria = ((await btn.get_attribute("aria-label")) or "").strip().lower()
+                    text = ((await btn.text_content()) or "").strip().lower()
+                    if "easy apply" in aria or "easy apply" in text:
+                        await btn.scroll_into_view_if_needed()
+                        await asyncio.sleep(0.5)
+                        await btn.click(force=True)
+                        await asyncio.sleep(2.0)
+                        return True
+                except Exception:
+                    continue
     except Exception as e:
         log.warning("Easy Apply button not found: %s", e)
     return False
@@ -649,8 +655,9 @@ async def _process_application_modal(
         action = await _determine_next_action(page)
 
         if action == "submit":
-            if dry_run:
-                console.print("  [yellow]DRY RUN: Would submit here[/yellow]")
+            is_authorized = not dry_run and getattr(config.apply, "allow_live_submission", False)
+            if not is_authorized:
+                console.print("  [yellow]SAFETY GUARD: Submission blocked. Dry run or live submission unauthorized.[/yellow]")
                 await _dismiss_modal(page)
                 return True
             await _click_footer_primary(page)
@@ -676,37 +683,87 @@ async def _process_application_modal(
 async def _determine_next_action(page) -> str:
     """Determine what the next action should be based on modal footer buttons.
 
-    Returns: 'submit', 'next', or 'none'
+    Returns: 'submit', 'review', 'next', or 'none'
     """
-    # Look for the primary button in the modal footer
-    footer_btn = await page.query_selector(APPLY_SELECTORS["next_button"])
-    if not footer_btn:
-        return "none"
-
-    # Check aria-label and text to determine if this is submit or next
-    aria = ((await footer_btn.get_attribute("aria-label")) or "").lower()
-    text = ((await footer_btn.text_content()) or "").strip().lower()
-
-    if "submit" in aria or "submit" in text:
-        return "submit"
-    if "review" in aria or "review" in text:
-        return "next"  # Review is just a pre-submit step
-    if "next" in aria or "next" in text or "continue" in aria or "continue" in text:
-        return "next"
-
-    # Default: treat as next
-    return "next"
-
-
-async def _click_footer_primary(page) -> None:
-    """Click the primary button in the modal footer."""
-    btn = await page.query_selector(APPLY_SELECTORS["next_button"])
-    if btn:
-        # Use force=True to bypass overlay interception (e.g., typeahead dropdowns)
+    candidate_selectors = [
+        "button[aria-label*='Submit' i]",
+        "button:has-text('Submit application')",
+        "button:has-text('Submit')",
+        "button[aria-label*='Review' i]",
+        "button:has-text('Review your application')",
+        "button:has-text('Review')",
+        "button[aria-label*='Next' i]",
+        "button:has-text('Next')",
+        "button[aria-label*='Continue' i]",
+        "button:has-text('Continue')",
+        "button.artdeco-button--primary",
+        "footer button",
+    ]
+    for sel in candidate_selectors:
         try:
-            await btn.click(timeout=5000)
+            btns = await page.query_selector_all(sel)
+            for b in btns:
+                if hasattr(b, "is_visible") and callable(b.is_visible):
+                    v = b.is_visible()
+                    if hasattr(v, "__await__"):
+                        v = await v
+                    if v is False:
+                        continue
+                raw_aria = await b.get_attribute("aria-label")
+                if hasattr(raw_aria, "__await__"):
+                    raw_aria = await raw_aria
+                aria = str(raw_aria or "").strip().lower()
+
+                raw_text = await b.text_content()
+                if hasattr(raw_text, "__await__"):
+                    raw_text = await raw_text
+                text = str(raw_text or "").strip().lower()
+
+                if "submit" in aria or "submit" in text:
+                    return "submit"
+                if "review" in aria or "review" in text:
+                    return "review"
+                if "next" in aria or "next" in text or "continue" in aria or "continue" in text:
+                    return "next"
         except Exception:
-            await btn.click(force=True, timeout=5000)
+            continue
+
+    return "none"
+
+
+
+async def _click_footer_primary(page) -> bool:
+    """Click the primary button in the modal footer to advance to next step or review."""
+    candidate_selectors = [
+        "button:has-text('Next')",
+        "button:has-text('Continue')",
+        "button:has-text('Review')",
+        "button:has-text('Review your application')",
+        "button[aria-label*='Next' i]",
+        "button[aria-label*='Continue' i]",
+        "button[aria-label*='Review' i]",
+        "button.artdeco-button--primary",
+        APPLY_SELECTORS["next_button"],
+        "footer button",
+    ]
+    for sel in candidate_selectors:
+        try:
+            btns = await page.query_selector_all(sel)
+            for btn in btns:
+                if not await btn.is_visible():
+                    continue
+                if await btn.is_disabled():
+                    continue
+                txt = ((await btn.text_content()) or "").strip().lower()
+                aria = ((await btn.get_attribute("aria-label")) or "").strip().lower()
+                if any(k in txt or k in aria for k in ["next", "continue", "review"]):
+                    await btn.scroll_into_view_if_needed()
+                    await asyncio.sleep(0.3)
+                    await btn.click(force=True, timeout=5000)
+                    return True
+        except Exception:
+            continue
+    return False
 
 
 async def _scrape_modal_profile(page, config: HunterConfig) -> None:
@@ -764,13 +821,9 @@ async def _scrape_modal_profile(page, config: HunterConfig) -> None:
 async def _dismiss_typeaheads(page) -> None:
     """Close any open typeahead/autocomplete dropdowns that overlay buttons."""
     try:
-        # Press Escape to close any open dropdowns
-        await page.keyboard.press("Escape")
-        await asyncio.sleep(0.3)
         # Click on a neutral area of the modal to defocus inputs
         modal = await page.query_selector(APPLY_SELECTORS["modal"])
         if modal:
-            # Click on the modal header area (safe, non-interactive)
             header = await modal.query_selector("h2, h3, .t-24")
             if header:
                 await header.click(force=True)
@@ -779,42 +832,617 @@ async def _dismiss_typeaheads(page) -> None:
         pass
 
 
-async def _dismiss_modal(page) -> None:
-    """Close any open modal dialogs."""
-    for selector in [APPLY_SELECTORS["dismiss_button"]]:
-        try:
-            btn = await page.query_selector(selector)
-            if btn:
-                await btn.click()
-                await asyncio.sleep(0.5)
-        except Exception:
-            pass
-
-    # Handle "Discard application" / "Save this application?" confirmation dialogs
+async def _dismiss_modal(page, log_event_cb: Optional[Callable] = None) -> None:
+    """Close any open modal dialogs and handle Save/Discard confirmation dialogs cleanly."""
+    # 1. Look for application modal dismiss button (X)
     try:
-        # Try multiple selectors for the discard/dismiss button in confirmation dialogs
-        discard_selectors = [
-            "button[data-control-name='discard_application_confirm_btn']",
-            "button.artdeco-modal__confirm-dialog-btn",
-            # "Save this application?" dialog — click Discard
-            "button[data-test-dialog-secondary-btn]",
+        dismiss_selectors = [
+            APPLY_SELECTORS["dismiss_button"],
+            "button[aria-label='Dismiss']",
+            "button.artdeco-modal__dismiss",
+            "button[data-test-modal-close-btn]",
+            "button[aria-label='Close']",
         ]
-        for sel in discard_selectors:
-            btn = await page.query_selector(sel)
-            if btn:
-                await btn.click()
-                await asyncio.sleep(0.5)
-                break
-
-        # Fallback: look for any button with "Discard" text in a dialog
-        if not btn:
-            all_btns = await page.query_selector_all("div.artdeco-modal button, div[role='dialog'] button, div[role='alertdialog'] button")
-            for b in all_btns:
-                text = ((await b.text_content()) or "").strip().lower()
-                if "discard" in text:
-                    await b.click()
-                    await asyncio.sleep(0.5)
-                    log.info("Clicked 'Discard' in confirmation dialog")
+        for selector in dismiss_selectors:
+            dismiss_btns = await page.query_selector_all(selector)
+            for d_btn in dismiss_btns:
+                if await d_btn.is_visible():
+                    await d_btn.click()
+                    await asyncio.sleep(0.8)
                     break
     except Exception:
         pass
+
+    # 2. Handle "Save this application?" / "Discard application" confirmation dialog
+    try:
+        dialog_el = await page.query_selector(
+            "div[data-test-modal-id='save-application-modal'], div.artdeco-modal[role='alertdialog'], div[role='alertdialog'], div[role='dialog']"
+        )
+        if dialog_el:
+            # Check if this dialog contains Save/Discard prompt
+            dialog_text = ((await dialog_el.text_content()) or "").lower()
+            if "save" in dialog_text or "discard" in dialog_text or "return to this application" in dialog_text:
+                if log_event_cb:
+                    log_event_cb("SAVE_EXIT_DIALOG_DETECTED", "Detected LinkedIn Save/Discard confirmation dialog. Clicking Discard.", "info")
+                
+                discard_selectors = [
+                    "button[data-control-name='discard_application_confirm_btn']",
+                    "button.artdeco-modal__confirm-dialog-btn",
+                    "button[data-test-dialog-secondary-btn]",
+                    "button:has-text('Discard')",
+                ]
+                for sel in discard_selectors:
+                    discard_btn = await page.query_selector(sel)
+                    if discard_btn and await discard_btn.is_visible():
+                        await discard_btn.click()
+                        await asyncio.sleep(0.5)
+                        if log_event_cb:
+                            log_event_cb("APPLICATION_DISCARD_CONFIRMED", "Clicked Discard on application exit confirmation.", "info")
+                        break
+    except Exception as e:
+        log.debug("Error handling discard confirmation dialog: %s", e)
+
+
+async def submit_final_application(page) -> bool:
+    """Submit the final application to LinkedIn.
+    
+    CRITICAL: This function must ONLY be called when is_real_submission_authorized is True.
+    """
+    candidate_selectors = [
+        "button[aria-label*='Submit' i]",
+        "button:has-text('Submit application')",
+        "button:has-text('Submit')",
+        "div.jobs-easy-apply-modal footer button.artdeco-button--primary",
+        "div.jobs-easy-apply-content footer button.artdeco-button--primary",
+        "div[role='dialog'] footer button.artdeco-button--primary",
+        "button.artdeco-button--primary",
+        "footer button",
+    ]
+    for sel in candidate_selectors:
+        try:
+            btns = await page.query_selector_all(sel)
+            for btn in btns:
+                if not await btn.is_visible():
+                    continue
+                if await btn.is_disabled():
+                    continue
+                txt = ((await btn.text_content()) or "").strip().lower()
+                aria = ((await btn.get_attribute("aria-label")) or "").strip().lower()
+                if "submit" in txt or "submit" in aria or ("primary" in sel and "cancel" not in txt and "dismiss" not in txt and "back" not in txt):
+                    await btn.scroll_into_view_if_needed()
+                    await asyncio.sleep(0.3)
+                    await btn.click(force=True, timeout=5000)
+                    await asyncio.sleep(2)
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+async def verify_post_submit_status(page, timeout_sec: float = 15.0) -> dict:
+    """Verify application submission result on LinkedIn after clicking final Submit.
+    
+    Returns a structured dict:
+    {
+        "status": "confirmed" | "failed" | "ambiguous",
+        "error_message": Optional[str],
+        "details": str,
+        "captcha_detected": bool,
+        "checkpoint_detected": bool,
+    }
+    """
+    result = {
+        "status": "ambiguous",
+        "error_message": None,
+        "details": "Post-submission verification initiated",
+        "captcha_detected": False,
+        "checkpoint_detected": False,
+    }
+
+    start_time = asyncio.get_event_loop().time()
+    while (asyncio.get_event_loop().time() - start_time) < timeout_sec:
+        current_url = page.url or ""
+
+        # 1. Check for security checkpoint / challenge / login redirect
+        if any(x in current_url for x in ["/checkpoint", "/challenge", "/security-check"]):
+            result["status"] = "failed"
+            result["checkpoint_detected"] = True
+            result["error_message"] = f"LinkedIn security checkpoint detected at {current_url}"
+            result["details"] = "Security checkpoint / challenge triggered upon submission."
+            return result
+
+        if any(x in current_url for x in ["/login", "/authwall", "/uas/login"]):
+            result["status"] = "failed"
+            result["error_message"] = "Redirected to login/authwall upon submission"
+            result["details"] = "Authentication session expired or login challenge triggered."
+            return result
+
+        # Check for CAPTCHA iframes/elements
+        try:
+            captcha_el = await page.query_selector("iframe[src*='arkose'], iframe[src*='recaptcha'], div#captcha-internal, div.captcha")
+            if captcha_el:
+                result["status"] = "failed"
+                result["captcha_detected"] = True
+                result["error_message"] = "CAPTCHA verification challenge detected"
+                result["details"] = "Submission halted due to CAPTCHA."
+                return result
+        except Exception:
+            pass
+
+        # 2. Check for form validation error in modal
+        try:
+            error_els = await page.query_selector_all(
+                "div.artdeco-inline-feedback--error, span.artdeco-inline-feedback__message, div[role='alert'], p.artdeco-inline-feedback__message"
+            )
+            for err in error_els:
+                if await err.is_visible():
+                    err_text = ((await err.text_content()) or "").strip()
+                    if err_text:
+                        result["status"] = "failed"
+                        result["error_message"] = f"LinkedIn submission rejected: {err_text}"
+                        result["details"] = f"Validation error on final submission step: {err_text}"
+                        return result
+        except Exception:
+            pass
+
+        # 3. Check for Post-Apply Success confirmation dialog/toast/heading
+        success_selectors = [
+            "div.jobs-post-apply-modal",
+            "div.artdeco-modal[role='dialog']:has-text('Application sent')",
+            "div.artdeco-modal[role='dialog']:has-text('Your application was sent')",
+            "div.artdeco-modal:has-text('Application submitted')",
+            "div.artdeco-modal:has-text('Your application has been submitted')",
+            "div[data-test-modal-id='post-apply-modal']",
+            "h2:has-text('Application sent')",
+            "h3:has-text('Application sent')",
+            "h2:has-text('Your application was sent')",
+            "h2:has-text('Application submitted')",
+            "span.jobs-details__applied-text",
+            "div.artdeco-inline-feedback--success",
+            "span.artdeco-inline-feedback__message:has-text('Applied')",
+        ]
+        for s_sel in success_selectors:
+            try:
+                s_el = await page.query_selector(s_sel)
+                if s_el and await s_el.is_visible():
+                    post_dismiss = await page.query_selector(
+                        "div.jobs-post-apply-modal button[aria-label='Dismiss'], div.jobs-post-apply-modal button:has-text('Done'), button.artdeco-modal__dismiss"
+                    )
+                    if post_dismiss:
+                        try:
+                            await post_dismiss.click()
+                        except Exception:
+                            pass
+                    result["status"] = "confirmed"
+                    result["details"] = "Application successfully submitted and confirmed by LinkedIn."
+                    result["error_message"] = None
+                    return result
+            except Exception:
+                continue
+
+        # 4. Check for 'Applied' status badge on the job details view
+        try:
+            applied_badge = await page.query_selector(
+                "span.artdeco-inline-feedback__message:has-text('Applied'), span.jobs-details__applied-text, div.jobs-s-apply span:has-text('Applied'), div.jobs-unified-top-card span:has-text('Applied'), button:has-text('Applied')"
+            )
+            if applied_badge and await applied_badge.is_visible():
+                result["status"] = "confirmed"
+                result["details"] = "Applied status badge verified on job page."
+                result["error_message"] = None
+                return result
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.8)
+
+    result["status"] = "ambiguous"
+    result["error_message"] = "Post-submission state was not conclusively confirmed within timeout"
+    result["details"] = "Submission was attempted, but confirmation indicators were not detected."
+    return result
+
+
+async def execute_single_job_playwright_apply(
+    page,
+    config: HunterConfig,
+    job_url: str,
+    job_id: str,
+    job_title: str,
+    dry_run: bool = True,
+    allow_live_submission: bool = False,
+    live_submission_confirmation: Optional[str] = None,
+    resume_path: Optional[str] = None,
+    log_event_cb: Optional[object] = None,
+) -> dict:
+    """Execute real Playwright Easy Apply flow for a single job with Triple-Key Safety Guard.
+
+    Triple-Key Safety Guard (Three-Condition Live Submission Guard):
+    - Real submission requires ALL THREE conditions:
+      1. dry_run is False
+      2. allow_live_submission is True
+      3. live_submission_confirmation == "CONFIRM_REAL_SUBMISSION"
+    - If ANY condition is missing or falsy, submission is blocked safely and dry-run telemetry is recorded.
+    """
+    def log_evt(event: str, message: str, level: str = "info", metadata: Optional[dict] = None):
+        if log_event_cb and callable(log_event_cb):
+            try:
+                log_event_cb(event, message, level, metadata or {})
+            except Exception as e:
+                log.warning("Failed to invoke log_event_cb: %s", e)
+
+    is_real_submission_authorized = bool(
+        (dry_run is False)
+        and (allow_live_submission is True)
+        and (live_submission_confirmation == "CONFIRM_REAL_SUBMISSION")
+    )
+
+    telemetry = {
+        "success": False,
+        "dry_run": dry_run,
+        "allow_live_submission": allow_live_submission,
+        "job_id": job_id,
+        "easy_apply_detected": False,
+        "modal_opened": False,
+        "steps_completed": 0,
+        "fields_detected": 0,
+        "fields_filled": 0,
+        "questions_detected": 0,
+        "questions_answered": 0,
+        "resume_uploaded": False,
+        "validation_errors": 0,
+        "review_reached": False,
+        "submission_attempted": False,
+        "submission_confirmed": False,
+        "submission_blocked": False,
+        "error_message": None,
+    }
+
+    # 1. Open Job Page
+    log_evt("JOB_PAGE_OPENED", f"Opening job page: {job_title}", "info", {"job_id": job_id, "url": job_url, "title": job_title})
+    try:
+        await page.goto(job_url, wait_until="domcontentloaded", timeout=25000)
+        await asyncio.sleep(2)
+    except Exception as e:
+        log_evt("JOB_PAGE_ERROR", f"Failed to load job page: {str(e)}", "error", {"job_id": job_id, "error": str(e)})
+        telemetry["error_message"] = f"Failed to load job page: {str(e)}"
+        return telemetry
+
+    # Check for security challenge / checkpoint / login redirect
+    current_url = page.url or ""
+    if any(x in current_url for x in ["/checkpoint", "/challenge", "/security-check"]):
+        log_evt("SECURITY_CHALLENGE_DETECTED", "LinkedIn security verification / checkpoint detected. Halting automation.", "error", {"job_id": job_id, "url": current_url})
+        telemetry["error_message"] = "Security challenge detected on job page"
+        return telemetry
+
+    if any(x in current_url for x in ["/login", "/authwall", "/uas/login"]):
+        log_evt("AUTH_REQUIRED", "Redirected to login/authwall while accessing job page.", "error", {"job_id": job_id, "url": current_url})
+        telemetry["error_message"] = "Authentication required on job page"
+        return telemetry
+
+    # 2. Check if already applied
+    if await _is_already_applied_on_page(page):
+        log_evt("JOB_SKIPPED", f"Job '{job_title}' is already applied on LinkedIn.", "warning", {"job_id": job_id, "reason": "already_applied"})
+        telemetry["error_message"] = "Already applied on LinkedIn"
+        telemetry["skipped"] = True
+        return telemetry
+
+    # 3. Detect and click Easy Apply button
+    clicked = False
+    for attempt in range(12):
+        if await _click_easy_apply(page):
+            clicked = True
+            break
+        await asyncio.sleep(1.0)
+
+    if not clicked:
+        log_evt("EASY_APPLY_NOT_AVAILABLE", f"Easy Apply is not available for '{job_title}'. Skipping.", "info", {"job_id": job_id, "url": job_url})
+        telemetry["error_message"] = "Easy Apply button not available"
+        telemetry["skipped"] = True
+        return telemetry
+
+    telemetry["easy_apply_detected"] = True
+    log_evt("EASY_APPLY_DETECTED", f"Easy Apply detected for '{job_title}'.", "info", {"job_id": job_id})
+
+    await asyncio.sleep(2.0)
+    modal_opened = False
+    for _ in range(12):
+        check_el = await page.query_selector(
+            "button:has-text('Next'), button:has-text('Review'), button:has-text('Submit application'), "
+            "button[aria-label='Dismiss'], div[role='dialog'], div.jobs-easy-apply-modal, div.jobs-easy-apply-content, "
+            "div.artdeco-modal, div#artdeco-modal-outlet div"
+        )
+        if check_el:
+            is_v = True
+            if hasattr(check_el, "is_visible") and callable(check_el.is_visible):
+                r = check_el.is_visible()
+                if hasattr(r, "__await__"):
+                    r = await r
+                if r is False:
+                    is_v = False
+            if is_v:
+                modal_opened = True
+                break
+        await asyncio.sleep(0.5)
+
+    if not modal_opened:
+        log_evt("MODAL_OPEN_FAILED", "Easy Apply modal container did not appear.", "error", {"job_id": job_id})
+        telemetry["error_message"] = "Easy Apply modal not detected"
+        return telemetry
+
+    telemetry["modal_opened"] = True
+    log_evt("APPLICATION_MODAL_OPENED", "Easy Apply application modal opened.", "info", {"job_id": job_id})
+
+    # Scrape applicant profile info visible in the modal header
+    await _scrape_modal_profile(page, config)
+
+    resume_text = extract_resume_text(Path(resume_path)) if (resume_path and Path(resume_path).exists()) else None
+
+    prev_error_count = 0
+    stuck_count = 0
+
+    # 5. Multi-Step Form Handling
+    for step in range(MAX_FORM_STEPS):
+        log_evt("FORM_STEP_STARTED", f"Processing application form step {step + 1}", "info", {"step": step + 1, "job_id": job_id})
+
+        await asyncio.sleep(1.5)
+
+        # Detect fields
+        fields = await detect_form_fields(page)
+        telemetry["fields_detected"] += len(fields)
+
+        step_fields_filled = 0
+        step_questions_answered = 0
+
+        for field in fields:
+            # Handle File Upload (Resume)
+            if field.field_type == FieldType.FILE_UPLOAD:
+                if resume_path and Path(resume_path).exists():
+                    log_evt("RESUME_UPLOAD_STARTED", "Uploading candidate resume.", "info", {"file": Path(resume_path).name})
+                    try:
+                        await field.element.set_input_files(str(resume_path))
+                        telemetry["resume_uploaded"] = True
+                        log_evt("RESUME_UPLOAD_COMPLETED", "Candidate resume uploaded successfully.", "info", {"file": Path(resume_path).name})
+                        step_fields_filled += 1
+                        telemetry["fields_filled"] += 1
+                    except Exception as e:
+                        log_evt("RESUME_UPLOAD_ERROR", f"Error uploading resume: {str(e)}", "warning", {"error": str(e)})
+                else:
+                    log_evt("RESUME_NOT_AVAILABLE", "No candidate resume file available on disk.", "warning", {"required": field.required})
+                continue
+
+            # Check if this is a question
+            is_question = bool(
+                field.field_type in [FieldType.RADIO, FieldType.SELECT, FieldType.CHECKBOX]
+                or any(kw in field.label.lower() for kw in ["how many", "years", "experience", "authorized", "require", "sponsor", "willing", "salary", "ctc", "notice", "open to", "work from"])
+            )
+
+            if is_question:
+                telemetry["questions_detected"] += 1
+                log_evt("QUESTION_DETECTED", f"Question detected: {field.label[:60]}", "debug", {
+                    "question": field.label[:80],
+                    "type": field.field_type.value,
+                    "required": field.required,
+                })
+
+            # Fill field
+            try:
+                filled = await _fill_field(page, field, config, resume_text=resume_text)
+                if filled:
+                    step_fields_filled += 1
+                    telemetry["fields_filled"] += 1
+                    log_evt("FIELD_FILLED", f"Filled form field: {field.label[:40]}", "debug", {
+                        "field": field.label[:50],
+                        "type": field.field_type.value,
+                        "filled": True,
+                    })
+                    if is_question:
+                        step_questions_answered += 1
+                        telemetry["questions_answered"] += 1
+                        log_evt("QUESTION_ANSWERED", f"Answered question: {field.label[:50]}", "debug", {
+                            "question": field.label[:50],
+                            "source": "profile/config",
+                        })
+                else:
+                    if field.required:
+                        if not is_question:
+                            log_evt("PROFILE_DATA_MISSING", f"Required profile field missing: {field.label[:40]}", "warning", {
+                                "field": field.label[:50],
+                                "required": True,
+                            })
+                        else:
+                            log_evt("QUESTION_UNRESOLVED", f"Required question could not be answered: {field.label[:40]}", "warning", {
+                                "question": field.label[:50],
+                                "required": True,
+                            })
+            except Exception as e:
+                log.warning("Field filling error on '%s': %s", field.label, e)
+
+        # Dismiss dropdowns
+        await _dismiss_typeaheads(page)
+        await short_delay()
+
+        # Check validation errors
+        errors = await page.query_selector_all(APPLY_SELECTORS["error_message"])
+        error_count = len(errors)
+        if error_count > 0:
+            telemetry["validation_errors"] += error_count
+            log_evt("FORM_VALIDATION_ERROR", f"Detected {error_count} validation error(s) in form step {step + 1}.", "warning", {
+                "count": error_count,
+                "step": step + 1,
+            })
+
+        if error_count > 0 and error_count >= prev_error_count:
+            stuck_count += 1
+        else:
+            stuck_count = 0
+        prev_error_count = error_count
+
+        if stuck_count >= 2:
+            log_evt("APPLICATION_FLOW_TIMEOUT", f"Form stuck at step {step + 1} with unresolvable errors. Closing modal safely.", "warning", {"step": step + 1})
+            await _dismiss_modal(page, log_evt)
+            telemetry["error_message"] = f"Form stuck at step {step + 1} with validation errors"
+            return telemetry
+
+        telemetry["steps_completed"] += 1
+        log_evt("FORM_STEP_COMPLETED", f"Completed step {step + 1} (filled {step_fields_filled} fields).", "info", {
+            "step": step + 1,
+            "fields_filled": step_fields_filled,
+            "questions_answered": step_questions_answered,
+        })
+
+        # Determine next action
+        action = await _determine_next_action(page)
+        
+        if action == "review":
+            telemetry["review_reached"] = True
+            log_evt("APPLICATION_REVIEW_REACHED", "Reached the application review step.", "info", {"step": step + 1, "job_id": job_id})
+            if not is_real_submission_authorized:
+                # SAFETY STOP: Dry-run or unconfirmed real submission stops at Review
+                telemetry["submission_blocked"] = True
+                telemetry["submission_confirmed"] = False
+                telemetry["success"] = True
+                guard_reason = "dry_run=True" if dry_run else "allow_live_submission not confirmed"
+                log_evt(
+                    "DRY_RUN_SUBMIT_BLOCKED",
+                    f"Final application submission blocked by safety guard ({guard_reason}). Modal reviewed successfully.",
+                    "info",
+                    {
+                        "job_id": job_id,
+                        "dry_run": dry_run,
+                        "allow_live_submission": allow_live_submission,
+                        "steps_completed": telemetry["steps_completed"],
+                        "fields_detected": telemetry["fields_detected"],
+                        "fields_filled": telemetry["fields_filled"],
+                        "questions_detected": telemetry["questions_detected"],
+                        "questions_answered": telemetry["questions_answered"],
+                        "resume_uploaded": telemetry["resume_uploaded"],
+                        "validation_errors": telemetry["validation_errors"],
+                        "review_reached": True,
+                        "submission_blocked": True,
+                        "submission_confirmed": False,
+                    },
+                )
+                await _dismiss_modal(page, log_evt)
+                log_evt("APPLICATION_MODAL_DISCARDED", "Easy Apply modal discarded cleanly.", "info", {"job_id": job_id})
+                log_evt("DRY_RUN_COMPLETED", "Dry run completed successfully with final submit blocked.", "info", {
+                    "job_id": job_id,
+                    "steps_completed": telemetry["steps_completed"],
+                    "fields_filled": telemetry["fields_filled"],
+                })
+                return telemetry
+            else:
+                await _click_footer_primary(page)
+                await asyncio.sleep(2.0)
+                action = await _determine_next_action(page)
+
+        # ── 6. FINAL SUBMISSION GUARD & VERIFICATION ─────────────────
+        if action == "submit":
+            if not is_real_submission_authorized:
+                telemetry["submission_blocked"] = True
+                telemetry["review_reached"] = True
+                telemetry["submission_confirmed"] = False
+                telemetry["success"] = True
+                guard_reason = "dry_run=True" if dry_run else "allow_live_submission not confirmed"
+                log_evt(
+                    "DRY_RUN_SUBMIT_BLOCKED",
+                    f"Final application submission blocked by safety guard ({guard_reason}). Modal reviewed successfully.",
+                    "info",
+                    {
+                        "job_id": job_id,
+                        "dry_run": dry_run,
+                        "allow_live_submission": allow_live_submission,
+                        "steps_completed": telemetry["steps_completed"],
+                        "fields_detected": telemetry["fields_detected"],
+                        "fields_filled": telemetry["fields_filled"],
+                        "questions_detected": telemetry["questions_detected"],
+                        "questions_answered": telemetry["questions_answered"],
+                        "resume_uploaded": telemetry["resume_uploaded"],
+                        "validation_errors": telemetry["validation_errors"],
+                        "review_reached": True,
+                        "submission_blocked": True,
+                        "submission_confirmed": False,
+                    },
+                )
+                await _dismiss_modal(page, log_evt)
+                log_evt("APPLICATION_MODAL_DISCARDED", "Easy Apply modal discarded cleanly.", "info", {"job_id": job_id})
+                log_evt("DRY_RUN_COMPLETED", "Dry run completed successfully with final submit blocked.", "info", {
+                    "job_id": job_id,
+                    "steps_completed": telemetry["steps_completed"],
+                    "fields_filled": telemetry["fields_filled"],
+                })
+                return telemetry
+            else:
+                # REAL SUBMISSION PATH (Explicitly enabled with Triple-Key Safety confirmation)
+                telemetry["submission_attempted"] = True
+                log_evt("SUBMISSION_ATTEMPTED", f"Attempting final application submission for '{job_title}'.", "info", {
+                    "job_id": job_id,
+                    "dry_run": False,
+                    "allow_live_submission": True,
+                })
+
+                await submit_final_application(page)
+                verification = await verify_post_submit_status(page)
+
+                if verification["status"] == "confirmed":
+                    telemetry["submission_confirmed"] = True
+                    telemetry["success"] = True
+                    telemetry["submission_blocked"] = False
+                    log_evt("SUBMISSION_CONFIRMED", "Application submission confirmed on LinkedIn.", "info", {
+                        "job_id": job_id,
+                        "details": verification["details"],
+                    })
+                    log_evt("APPLICATION_SUBMITTED", f"Application submitted for {job_title}.", "info", {
+                        "job_id": job_id,
+                        "confirmed": True,
+                    })
+                    return telemetry
+                else:
+                    telemetry["submission_confirmed"] = False
+                    telemetry["success"] = False
+                    telemetry["error_message"] = verification.get("error_message") or "Submission unconfirmed"
+                    log_evt("SUBMISSION_FAILED", f"Submission verification failed: {telemetry['error_message']}", "error", {
+                        "job_id": job_id,
+                        "verification": verification,
+                    })
+                    await _dismiss_modal(page, log_evt)
+                    return telemetry
+
+        elif action == "next":
+            await _click_footer_primary(page)
+            await asyncio.sleep(1.5)
+            continue
+        else:
+            if not is_real_submission_authorized and telemetry["review_reached"]:
+                telemetry["submission_blocked"] = True
+                telemetry["success"] = True
+                telemetry["submission_confirmed"] = False
+                log_evt(
+                    "DRY_RUN_SUBMIT_BLOCKED",
+                    "Final application submission blocked by safety guard. Modal reviewed successfully.",
+                    "info",
+                    {
+                        "job_id": job_id,
+                        "dry_run": dry_run,
+                        "allow_live_submission": allow_live_submission,
+                        "steps_completed": telemetry["steps_completed"],
+                        "review_reached": True,
+                        "submission_blocked": True,
+                        "submission_confirmed": False,
+                    },
+                )
+                await _dismiss_modal(page, log_evt)
+                log_evt("APPLICATION_MODAL_DISCARDED", "Easy Apply modal discarded cleanly.", "info", {"job_id": job_id})
+                log_evt("DRY_RUN_COMPLETED", "Dry run completed successfully with final submit blocked.", "info", {
+                    "job_id": job_id,
+                    "steps_completed": telemetry["steps_completed"],
+                })
+                return telemetry
+
+            log_evt("NO_ACTION_BUTTON", f"No actionable button found at step {step + 1}. Closing modal.", "warning", {"step": step + 1})
+            break
+
+    # If steps exhausted
+    await _dismiss_modal(page, log_evt)
+    log_evt("APPLICATION_MODAL_DISCARDED", "Easy Apply modal dismissed.", "info", {"job_id": job_id})
+    telemetry["success"] = telemetry["steps_completed"] > 0 and telemetry["submission_blocked"]
+    return telemetry
+

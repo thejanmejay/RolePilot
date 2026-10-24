@@ -42,13 +42,13 @@ class FormField:
 
 # Selectors for Easy Apply modal form elements
 MODAL_SELECTORS = {
-    "modal": "div.jobs-easy-apply-modal, div[data-test-modal]",
-    "form_groups": "div.fb-dash-form-element, div.jobs-easy-apply-form-section__grouping",
-    "label": "label, span.fb-dash-form-element__label, span.t-14.t-bold",
-    "text_input": "input[type='text'], input[type='email'], input[type='tel'], input[type='number'], input[type='url']",
+    "modal": "div.jobs-easy-apply-modal, div[data-test-modal], div[role='dialog']",
+    "form_groups": "div.fb-dash-form-element, div.jobs-easy-apply-form-section__grouping, div.jobs-easy-apply-form-element, fieldset, div[data-test-form-element], div[data-test-single-typeahead-entity-form-title], div.artdeco-text-input--container",
+    "label": "label, span.fb-dash-form-element__label, span.t-14.t-bold, legend",
+    "text_input": "input[type='text'], input[type='email'], input[type='tel'], input[type='number'], input[type='url'], input:not([type])",
     "textarea": "textarea",
     "select": "select",
-    "radio_group": "fieldset input[type='radio']",
+    "radio_group": "fieldset input[type='radio'], input[type='radio']",
     "checkbox": "input[type='checkbox']",
     "file_upload": "input[type='file']",
     "required_marker": "span.fb-dash-form-element__label-title--is-required, span[aria-hidden='true']",
@@ -70,6 +70,59 @@ async def detect_form_fields(page: Page) -> list[FormField]:
                 fields.append(field)
         except Exception as e:
             log.warning("Error detecting field: %s", e)
+
+    # Fallback to direct input scanning if no structured form groups matched
+    if not fields:
+        inputs = await page.query_selector_all("input:not([type='hidden']), select, textarea")
+        for inp in inputs:
+            try:
+                if not await inp.is_visible():
+                    continue
+                itype = ((await inp.get_attribute("type")) or "text").lower()
+                name = (await inp.get_attribute("name")) or ""
+                eid = (await inp.get_attribute("id")) or ""
+                aria_label = (await inp.get_attribute("aria-label")) or ""
+                placeholder = (await inp.get_attribute("placeholder")) or ""
+                
+                label = aria_label
+                if not label and eid:
+                    lbl_el = await page.query_selector(f"label[for='{eid}']")
+                    if lbl_el:
+                        label = (await lbl_el.text_content()) or ""
+                if not label:
+                    # Look for closest label or heading in parent tree
+                    try:
+                        lbl_text = await inp.evaluate("el => { const p = el.closest('div, fieldset'); return p ? (p.querySelector('label, legend, span.fb-dash-form-element__label, h3, div[data-test-single-typeahead-entity-form-title]')?.textContent || '') : ''; }")
+                        if lbl_text:
+                            label = lbl_text
+                    except Exception:
+                        pass
+                if not label and placeholder:
+                    label = placeholder
+                
+                tag = (await inp.evaluate("el => el.tagName.toLowerCase()"))
+                ftype = FieldType.TEXT
+                if itype == "file":
+                    ftype = FieldType.FILE_UPLOAD
+                elif itype == "radio":
+                    ftype = FieldType.RADIO
+                elif itype == "checkbox":
+                    ftype = FieldType.CHECKBOX
+                elif tag == "select":
+                    ftype = FieldType.SELECT
+                elif tag == "textarea":
+                    ftype = FieldType.TEXTAREA
+
+                fields.append(FormField(
+                    field_type=ftype,
+                    label=label.strip() or placeholder or name or "Field",
+                    element=inp,
+                    name=name,
+                    element_id=eid,
+                    input_type=itype,
+                ))
+            except Exception:
+                continue
 
     # Also look for standalone file uploads
     file_inputs = await page.query_selector_all(MODAL_SELECTORS["file_upload"])
@@ -93,7 +146,15 @@ async def detect_form_fields(page: Page) -> list[FormField]:
 
 async def _get_label(group: ElementHandle) -> str:
     """Extract the label text from a form group."""
-    for selector in ["label", "span.fb-dash-form-element__label", "span.t-14.t-bold", "legend"]:
+    for selector in [
+        "label",
+        "span.fb-dash-form-element__label",
+        "span.t-14.t-bold",
+        "legend",
+        "div[data-test-single-typeahead-entity-form-title]",
+        "h3",
+        "p.t-14",
+    ]:
         label_el = await group.query_selector(selector)
         if label_el:
             # Prefer the aria-hidden span (visible text) to avoid duplication
@@ -106,6 +167,15 @@ async def _get_label(group: ElementHandle) -> str:
             if text and text.strip():
                 cleaned = _deduplicate_label(text.strip())
                 return cleaned
+    # Fallback: check input placeholder, aria-label, name
+    inp = await group.query_selector("input, select, textarea")
+    if inp:
+        aria = await inp.get_attribute("aria-label")
+        if aria and aria.strip():
+            return aria.strip()
+        ph = await inp.get_attribute("placeholder")
+        if ph and ph.strip():
+            return ph.strip()
     return ""
 
 

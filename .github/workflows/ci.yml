@@ -1,0 +1,132 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # 1. Frontend Checks: Lint, TypeScript Typecheck, Build & Unit Tests
+  # ============================================================
+  frontend:
+    name: Frontend (Lint, Typecheck & Build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run linter (oxlint)
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Run TypeScript typecheck and production build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Run Application Readiness Engine tests
+        run: node --experimental-strip-types tests/test_readiness_engine.ts
+
+  # ============================================================
+  # 2. Backend Checks: Unit, API, and Multi-Tenant Isolation Tests
+  # ============================================================
+  backend:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PYTHONPATH: ".:src"
+      DATABASE_URL: "sqlite:///:memory:"
+      SUPABASE_URL: "https://mock-supabase.co"
+      SUPABASE_KEY: "mock-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "mock-service-role-key"
+      SUPABASE_JWT_SECRET: "test-super-secure-secret-key-for-jwt-signing-1234567890"
+      ENVIRONMENT: "testing"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run backend pytest suite
+        run: |
+          pytest tests/test_backend.py tests/test_fixes.py tests/test_profile_readiness_flow.py -v --tb=short
+
+  # ============================================================
+  # 3. Playwright Browser Tests: Form Detection, Telemetry & Dry-Run Guard
+  # ============================================================
+  playwright:
+    name: Playwright & Safety Guard Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PYTHONPATH: ".:src"
+      DATABASE_URL: "sqlite:///:memory:"
+      SUPABASE_URL: "https://mock-supabase.co"
+      SUPABASE_KEY: "mock-anon-key"
+      SUPABASE_SERVICE_ROLE_KEY: "mock-service-role-key"
+      SUPABASE_JWT_SECRET: "test-super-secure-secret-key-for-jwt-signing-1234567890"
+      DRY_RUN: "true"
+      ALLOW_LIVE_SUBMISSION: "false"
+      ENVIRONMENT: "testing"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Install Playwright browsers and system dependencies
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Run Playwright safety guard and form detector tests
+        run: |
+          pytest tests/test_playwright_apply.py -v --tb=short

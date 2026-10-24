@@ -146,6 +146,50 @@ linkedin-hunter status
 
 ---
 
+## Continuous Integration (CI)
+
+A GitHub Actions CI workflow is configured in [`.github/workflows/ci.yml`](file:///Users/janamjay/linkedin/.github/workflows/ci.yml).
+
+### Triggers
+- **Pushes** to `main`
+- **Pull Requests** targeting `main`
+- **Manual Trigger** (`workflow_dispatch`)
+
+### CI Jobs & Local Reproduction
+1. **Frontend Job** (`frontend`):
+   - Sets up Node.js 22 and caches npm packages via `frontend/package-lock.json`.
+   - Runs `oxlint` linter and strict TypeScript typechecking + Vite production bundle build.
+   - Executes the TypeScript Application Readiness Engine unit test suite.
+   - **Local command:**
+     ```bash
+     npm --prefix frontend ci
+     npm --prefix frontend run lint
+     npm --prefix frontend run build
+     node --experimental-strip-types tests/test_readiness_engine.ts
+     ```
+
+2. **Backend Job** (`backend`):
+   - Sets up Python 3.12 and installs dependencies from `requirements.txt`.
+   - Runs unit, FastAPI API, and multi-tenant security isolation tests against an in-memory SQLite database (`DATABASE_URL=sqlite:///:memory:`).
+   - **Local command:**
+     ```bash
+     PYTHONPATH=.:src pytest tests/test_backend.py tests/test_fixes.py tests/test_profile_readiness_flow.py -v
+     ```
+
+3. **Playwright Safety Job** (`playwright`):
+   - Installs Playwright browser binaries with system dependencies (`chromium`).
+   - Executes form detection, step telemetry, and Triple-Key safety guard tests in mock/dry-run mode (`DRY_RUN=true`, `ALLOW_LIVE_SUBMISSION=false`).
+   - Real LinkedIn credentials are never required or utilized in CI.
+   - **Local command:**
+     ```bash
+     PYTHONPATH=.:src pytest tests/test_playwright_apply.py -v
+     ```
+
+### Secrets Configuration
+- **No GitHub repository secrets are required** to run this pipeline. All backend and browser tests are fully isolated and utilize in-memory mock environments and synthetic JWT signatures.
+
+---
+
 ## Running Tests
 
 Execute the full regression test suite:

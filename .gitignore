@@ -27,3 +27,17 @@ venv/
 
 # Logs
 *.log
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Local helper scripts
+scripts/get_test_token.py
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
