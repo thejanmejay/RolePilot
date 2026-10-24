@@ -1,0 +1,202 @@
+/* Policy Acceptance UI Styling */
+
+.policy-page-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background-color: #F8FAFC;
+}
+
+.policy-card {
+  width: 100%;
+  max-width: 680px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.06), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+  padding: 36px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.policy-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.policy-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.policy-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+}
+
+.policy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  background-color: #EFF6FF;
+  color: #0A66C2;
+  border: 1px solid #BFDBFE;
+}
+
+.policy-subtitle {
+  font-size: 0.95rem;
+  color: #64748B;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.policy-scroll-area {
+  height: 320px;
+  overflow-y: auto;
+  border: 1px solid #E2E8F0;
+  background-color: #F8FAFC;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.policy-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.policy-scroll-area::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+
+.policy-scroll-area::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+.policy-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1E293B;
+  margin-bottom: 4px;
+}
+
+.policy-section-text {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #475569;
+  margin: 0;
+}
+
+.policy-disclaimer {
+  font-size: 0.8rem;
+  color: #94A3B8;
+  font-style: italic;
+  padding-top: 8px;
+  border-top: 1px dashed #CBD5E1;
+}
+
+.policy-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.policy-btn-accept {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 24px;
+  font-size: 0.925rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background-color: #0A66C2;
+  color: #FFFFFF;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.policy-btn-accept:hover:not(:disabled) {
+  background-color: #084e96;
+}
+
+.policy-btn-accept:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.policy-btn-decline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 20px;
+  font-size: 0.925rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background-color: transparent;
+  color: #64748B;
+  border: 1px solid #CBD5E1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.policy-btn-decline:hover:not(:disabled) {
+  background-color: #F1F5F9;
+  color: #0F172A;
+  border-color: #94A3B8;
+}
+
+/* Declined State */
+.policy-declined-box {
+  background-color: #FFF1F2;
+  border: 1px solid #FECDD3;
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  text-align: center;
+}
+
+.policy-declined-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: #FFE4E6;
+  color: #E11D48;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.policy-declined-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #9F1239;
+  margin: 0;
+}
+
+.policy-declined-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #4C0519;
+  margin: 0;
+  max-width: 500px;
+}

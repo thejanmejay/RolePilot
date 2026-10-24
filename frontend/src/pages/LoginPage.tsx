@@ -10,7 +10,8 @@ import { useAuth } from '../context/AuthContext';
 interface LoginPageProps {
   onNavigateSignup: () => void;
   onNavigateHome: () => void;
-  onNavigateDashboard: () => void;
+  onNavigateDashboard?: () => void;
+  onSuccess?: () => void;
   onNavigateForgotPassword: () => void;
   onNavigateVerifyEmail: (email: string) => void;
 }
@@ -19,6 +20,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onNavigateSignup,
   onNavigateHome,
   onNavigateDashboard,
+  onSuccess,
   onNavigateForgotPassword,
   onNavigateVerifyEmail,
 }) => {
@@ -120,9 +122,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       if (res.token) {
         login(res.token, res.session, res.user);
-        setSuccessMessage('Signed in successfully! Redirecting to dashboard...');
+        setSuccessMessage('Signed in successfully! Redirecting...');
         setTimeout(() => {
-          onNavigateDashboard();
+          if (onSuccess) {
+            onSuccess();
+          } else if (onNavigateDashboard) {
+            onNavigateDashboard();
+          }
         }, 500);
       }
     } catch (err: any) {
@@ -147,7 +153,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       login(trimmed);
       setSuccessMessage('Developer session authenticated! Redirecting...');
       setTimeout(() => {
-        onNavigateDashboard();
+        if (onSuccess) {
+          onSuccess();
+        } else if (onNavigateDashboard) {
+          onNavigateDashboard();
+        }
       }, 500);
     } catch (err: any) {
       setDevTokenError(err.message || 'Failed to parse developer token.');
@@ -177,7 +187,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         {generalError && (
           <div role="alert" className="auth-alert auth-alert-error">
             <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>{generalError}</div>
+            <div style={{ flex: 1 }}>
+              <div>{generalError}</div>
+              {generalError.toLowerCase().includes('not verified') && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateVerifyEmail(email.trim())}
+                  className="auth-text-link"
+                  style={{
+                    fontSize: '0.825rem',
+                    marginTop: '6px',
+                    display: 'inline-block',
+                    fontWeight: 600,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Check your email / Resend verification link &rarr;
+                </button>
+              )}
+            </div>
           </div>
         )}
 

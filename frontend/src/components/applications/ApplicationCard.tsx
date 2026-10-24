@@ -155,7 +155,7 @@ export const ApplicationCard: React.FC<ApplicationCardProps> = ({
             }}
           >
             <Bot size={11} />
-            Hunter Auto-Apply
+            RolePilot Auto-Apply
           </span>
         )}
       </div>

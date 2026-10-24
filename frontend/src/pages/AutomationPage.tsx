@@ -131,7 +131,7 @@ export const AutomationPage: React.FC<AutomationPageProps> = ({
         <div>
           <h1 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Bot size={28} color="var(--primary)" />
-            <span>Hunter Automation Runner</span>
+            <span>RolePilot Automation Runner</span>
           </h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             Autonomous LinkedIn job search, qualification evaluation, and application engine.
@@ -174,7 +174,7 @@ export const AutomationPage: React.FC<AutomationPageProps> = ({
         <EmptyState
           icon={Bot}
           title="No automation runs executed yet"
-          description="Hunter searches LinkedIn based on your target keywords, matches your skills, and automates job applications in the background."
+          description="RolePilot searches based on your target keywords, matches your skills, and automates job applications in the background."
           actionText="Launch Your First Run"
           onAction={() => setIsTriggerModalOpen(true)}
         />

@@ -115,4 +115,272 @@ assert.strictEqual(maskEmail('al@domain.com'), 'a***@domain.com');
 assert.strictEqual(maskEmail('test.user+hunter@company.org'), 't***r@company.org');
 console.log('✓ Test 8: Masked email formatting passed.');
 
-console.log('--- All Authentication UI Unit Tests Passed Successfully! ---');
+// Test 9: Auth flow router decision logic
+type UserState = {
+  isAuthenticated: boolean;
+  isConfirmed: boolean;
+  hasAcceptedPolicy: boolean;
+  isOnboardingCompleted: boolean;
+};
+
+function determineRoute(state: UserState, currentPath: string): string {
+  if (!state.isAuthenticated) {
+    if (!state.isConfirmed) return '/verify-email';
+    if (currentPath === '/' || currentPath === '/signup' || currentPath === '/forgot-password' || currentPath === '/reset-password') {
+      return currentPath;
+    }
+    return '/login';
+  }
+
+  // Authenticated
+  if (!state.hasAcceptedPolicy) {
+    return '/policy-acceptance';
+  }
+
+  if (!state.isOnboardingCompleted) {
+    return '/onboarding';
+  }
+
+  if (
+    currentPath === '/login' ||
+    currentPath === '/signup' ||
+    currentPath === '/verify-email' ||
+    currentPath === '/auth/callback' ||
+    currentPath === '/onboarding' ||
+    currentPath === '/'
+  ) {
+    return '/dashboard';
+  }
+
+  return currentPath;
+}
+
+// 9a: Unverified user redirected to /verify-email
+assert.strictEqual(
+  determineRoute({ isAuthenticated: false, isConfirmed: false, hasAcceptedPolicy: false, isOnboardingCompleted: false }, '/dashboard'),
+  '/verify-email'
+);
+
+// 9b: Verified user without policy acceptance directed to /policy-acceptance
+assert.strictEqual(
+  determineRoute({ isAuthenticated: true, isConfirmed: true, hasAcceptedPolicy: false, isOnboardingCompleted: false }, '/dashboard'),
+  '/policy-acceptance'
+);
+
+// 9c: Verified user with policy accepted but incomplete onboarding directed to /onboarding
+assert.strictEqual(
+  determineRoute({ isAuthenticated: true, isConfirmed: true, hasAcceptedPolicy: true, isOnboardingCompleted: false }, '/dashboard'),
+  '/onboarding'
+);
+
+// 9d: Direct navigation to /profile or /jobs during incomplete onboarding directed to /onboarding
+assert.strictEqual(
+  determineRoute({ isAuthenticated: true, isConfirmed: true, hasAcceptedPolicy: true, isOnboardingCompleted: false }, '/profile'),
+  '/onboarding'
+);
+
+// 9e: Fully onboarded user allowed into /dashboard
+assert.strictEqual(
+  determineRoute({ isAuthenticated: true, isConfirmed: true, hasAcceptedPolicy: true, isOnboardingCompleted: true }, '/'),
+  '/dashboard'
+);
+
+// 9f: Fully onboarded user visiting existing /profile (Readiness) dashboard allowed through
+assert.strictEqual(
+  determineRoute({ isAuthenticated: true, isConfirmed: true, hasAcceptedPolicy: true, isOnboardingCompleted: true }, '/profile'),
+  '/profile'
+);
+
+// 9g: Logged out user attempting protected /automation directed to /login
+assert.strictEqual(
+  determineRoute({ isAuthenticated: false, isConfirmed: true, hasAcceptedPolicy: false, isOnboardingCompleted: false }, '/automation'),
+  '/login'
+);
+console.log('✓ Test 9: Auth & Onboarding flow router decision logic passed.');
+
+// Test 9.1: Onboarding field validations
+function validateHeadline(headline: string): string | null {
+  if (!headline.trim()) return 'Professional title is required.';
+  if (headline.trim().length < 2) return 'Title must be at least 2 characters.';
+  return null;
+}
+
+function validateTargetRole(targetRole: string): string | null {
+  if (!targetRole.trim()) return 'Target role or job search goal is required.';
+  if (targetRole.trim().length < 2) return 'Target role must be at least 2 characters.';
+  return null;
+}
+
+function validateExperienceYears(years: any): string | null {
+  const num = Number(years);
+  if (isNaN(num) || num < 0) return 'Please enter valid years of experience (0 or higher).';
+  if (num > 60) return 'Please enter a realistic number of years.';
+  return null;
+}
+
+assert.strictEqual(validateHeadline(''), 'Professional title is required.');
+assert.strictEqual(validateHeadline('A'), 'Title must be at least 2 characters.');
+assert.strictEqual(validateHeadline('Senior Full Stack Engineer'), null);
+
+assert.strictEqual(validateTargetRole(''), 'Target role or job search goal is required.');
+assert.strictEqual(validateTargetRole('R'), 'Target role must be at least 2 characters.');
+assert.strictEqual(validateTargetRole('Engineering Manager'), null);
+
+assert.strictEqual(validateExperienceYears(-1), 'Please enter valid years of experience (0 or higher).');
+assert.strictEqual(validateExperienceYears(75), 'Please enter a realistic number of years.');
+assert.strictEqual(validateExperienceYears(0), null);
+assert.strictEqual(validateExperienceYears(5), null);
+console.log('✓ Test 9.1: Onboarding form validation rules passed.');
+
+// Test 10: Authoritative verification checking logic
+function isAuthoritativelyConfirmed(user: { email_confirmed_at?: string | null } | null): boolean {
+  return Boolean(user && user.email_confirmed_at);
+}
+
+assert.strictEqual(isAuthoritativelyConfirmed(null), false);
+assert.strictEqual(isAuthoritativelyConfirmed({ email_confirmed_at: null }), false);
+assert.strictEqual(isAuthoritativelyConfirmed({ email_confirmed_at: undefined }), false);
+assert.strictEqual(isAuthoritativelyConfirmed({ email_confirmed_at: '2026-10-24T12:00:00Z' }), true);
+console.log('✓ Test 10: Authoritative verification checking logic passed.');
+
+// Test 11: Callback parameter parsing (hash & query)
+function parseCallbackParams(url: string): {
+  code: string | null;
+  tokenHash: string | null;
+  otpType: string | null;
+  error: string | null;
+} {
+  const parsed = new URL(url);
+  const searchParams = parsed.searchParams;
+  const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+
+  const error =
+    searchParams.get('error_description') ||
+    hashParams.get('error_description') ||
+    searchParams.get('error') ||
+    hashParams.get('error');
+
+  const code = searchParams.get('code');
+  const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
+  const otpType = searchParams.get('type') || hashParams.get('type');
+
+  return { code, tokenHash, otpType, error };
+}
+
+// 11a: PKCE code
+const pkceRes = parseCallbackParams('http://localhost:3001/auth/callback?code=test-code-123');
+assert.strictEqual(pkceRes.code, 'test-code-123');
+assert.strictEqual(pkceRes.error, null);
+
+// 11b: Token hash link
+const hashRes = parseCallbackParams('http://localhost:3001/auth/callback?token_hash=abc123token&type=signup');
+assert.strictEqual(hashRes.tokenHash, 'abc123token');
+assert.strictEqual(hashRes.otpType, 'signup');
+
+// 11c: Error callback
+const errRes = parseCallbackParams('http://localhost:3001/auth/callback#error=access_denied&error_description=User+cancelled');
+assert.strictEqual(errRes.error, 'User cancelled');
+console.log('✓ Test 11: Callback parameter parsing passed.');
+
+// Test 12: Stale session prevention logic
+function sanitizeAuthSession(sessionUser: { email_confirmed_at?: string | null } | null) {
+  if (!sessionUser || !sessionUser.email_confirmed_at) {
+    return {
+      authenticated: false,
+      token: null,
+      shouldClearStorage: true,
+      requiresVerification: Boolean(sessionUser),
+    };
+  }
+  return {
+    authenticated: true,
+    token: 'valid_access_token',
+    shouldClearStorage: false,
+    requiresVerification: false,
+  };
+}
+
+assert.deepStrictEqual(sanitizeAuthSession(null), {
+  authenticated: false,
+  token: null,
+  shouldClearStorage: true,
+  requiresVerification: false,
+});
+assert.deepStrictEqual(sanitizeAuthSession({ email_confirmed_at: null }), {
+  authenticated: false,
+  token: null,
+  shouldClearStorage: true,
+  requiresVerification: true,
+});
+assert.deepStrictEqual(sanitizeAuthSession({ email_confirmed_at: '2026-10-24T10:00:00Z' }), {
+  authenticated: true,
+  token: 'valid_access_token',
+  shouldClearStorage: false,
+  requiresVerification: false,
+});
+console.log('✓ Test 12: Stale session prevention logic passed.');
+
+// Test 13: Password login unconfirmed response handling
+function handleSignInResult(errMessage: string): { requiresVerification: boolean; userMessage: string } {
+  if (errMessage.toLowerCase().includes('email not confirmed')) {
+    return {
+      requiresVerification: true,
+      userMessage: "Your email address is not verified yet. We've sent a verification link to your email address.",
+    };
+  }
+  return {
+    requiresVerification: false,
+    userMessage: errMessage,
+  };
+}
+
+const unconfirmedSignIn = handleSignInResult('AuthApiError: Email not confirmed');
+assert.strictEqual(unconfirmedSignIn.requiresVerification, true);
+assert(unconfirmedSignIn.userMessage.includes('not verified'));
+assert(unconfirmedSignIn.userMessage.includes('verification link'));
+
+const badPasswordSignIn = handleSignInResult('Invalid login credentials');
+assert.strictEqual(badPasswordSignIn.requiresVerification, false);
+console.log('✓ Test 13: Password login unconfirmed response handling passed.');
+
+// Test 14: Verification link post-signup screen state logic
+function getVerificationScreenState(params: {
+  email: string;
+  cooldown: number;
+  isResending: boolean;
+}): {
+  heading: string;
+  canResend: boolean;
+  resendButtonText: string;
+  displayEmail: string;
+} {
+  return {
+    heading: 'Check your email',
+    canResend: params.cooldown <= 0 && !params.isResending,
+    resendButtonText: params.isResending
+      ? 'Sending verification link...'
+      : params.cooldown > 0
+      ? `Resend email in ${params.cooldown}s`
+      : 'Resend verification email',
+    displayEmail: params.email.trim(),
+  };
+}
+
+const initialScreen = getVerificationScreenState({ email: 'candidate@rolepilot.com', cooldown: 0, isResending: false });
+assert.strictEqual(initialScreen.heading, 'Check your email');
+assert.strictEqual(initialScreen.canResend, true);
+assert.strictEqual(initialScreen.resendButtonText, 'Resend verification email');
+assert.strictEqual(initialScreen.displayEmail, 'candidate@rolepilot.com');
+
+const coolingScreen = getVerificationScreenState({ email: 'candidate@rolepilot.com', cooldown: 45, isResending: false });
+assert.strictEqual(coolingScreen.canResend, false);
+assert.strictEqual(coolingScreen.resendButtonText, 'Resend email in 45s');
+
+const resendingScreen = getVerificationScreenState({ email: 'candidate@rolepilot.com', cooldown: 0, isResending: true });
+assert.strictEqual(resendingScreen.canResend, false);
+assert.strictEqual(resendingScreen.resendButtonText, 'Sending verification link...');
+console.log('✓ Test 14: Verification link post-signup screen state logic passed.');
+
+console.log('--- All Authentication & Routing Flow Unit Tests Passed Successfully! ---');
+
+

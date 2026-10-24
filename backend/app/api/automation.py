@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from backend.app.api.policy import require_policy_accepted
 from backend.app.core.security import get_current_user_id
 from backend.app.db.database import get_db
 from backend.app.schemas.application import ApplicationResponse
@@ -17,7 +18,11 @@ from backend.app.services.application_service import ApplicationService
 from backend.app.services.automation_service import AutomationService
 from backend.app.workers.linkedin_worker import run_linkedin_automation_task
 
-router = APIRouter(prefix="/automation", tags=["Automation"])
+router = APIRouter(
+    prefix="/automation",
+    tags=["Automation"],
+    dependencies=[Depends(require_policy_accepted)],
+)
 
 
 @router.post("/runs", response_model=AutomationRunResponse, status_code=status.HTTP_201_CREATED)

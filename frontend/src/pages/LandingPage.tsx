@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Check,
 } from 'lucide-react';
+import { RolePilotLogo } from '../components/common/RolePilotLogo';
 import '../components/auth/auth.css';
 
 interface LandingPageProps {
@@ -37,11 +38,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 onNavigateSignup();
               }
             }}
-            aria-label="LinkedIn Hunter Home"
+            aria-label="RolePilot Home"
           >
-            <div className="auth-logo-badge">in</div>
-            <span className="auth-brand-name">LinkedIn Hunter</span>
-            <span className="auth-brand-pill">Pro</span>
+            <RolePilotLogo variant="compact" height={36} alt="RolePilot — Your Career. Your Next Move." />
           </div>
 
           <nav className="landing-nav-links" aria-label="Main Navigation">
@@ -81,17 +80,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Hero Section */}
       <section className="landing-hero" aria-labelledby="hero-heading">
         <div className="landing-hero-badge">
-          <Sparkles size={14} />
-          <span>Intelligent Application Assistant for Professionals</span>
+          <Sparkles size={14} color="#FFAD18" />
+          <span>Your Career. Your Next Move.</span>
         </div>
 
         <h1 id="hero-heading" className="landing-hero-title">
-          Your job search. More focused. Less repetitive.
+          Your Career. Your Next Move.
         </h1>
 
         <p className="landing-hero-subtitle">
-          Organize your job search and simplify repetitive application tasks
-          with LinkedIn Hunter.
+          Discover opportunities, streamline applications, and manage your job search from one place with RolePilot.
         </p>
 
         <div className="landing-hero-ctas">
@@ -129,7 +127,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 fontWeight: 500,
               }}
             >
-              LinkedIn Hunter Automation & Readiness Pipeline
+              RolePilot Automation & Readiness Pipeline
             </span>
           </div>
 
@@ -339,7 +337,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               You remain in complete control
             </h2>
             <p className="landing-control-text">
-              LinkedIn Hunter is designed to organize, simplify, and assist your
+              RolePilot is designed to organize, simplify, and assist your
               job search workflow — not run wild without your supervision. Every
               application is staged for your review and confirmation before
               submission.
@@ -356,8 +354,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             >
               <ShieldAlert size={16} color="var(--auth-blue)" />
               <span>
-                <strong>Important note:</strong> LinkedIn Hunter is a productivity
-                tool. We do not claim or guarantee interviews, automatic hiring, or
+                <strong>Important note:</strong> RolePilot is a career platform.
+                We do not claim or guarantee interviews, automatic hiring, or
                 job placement.
               </span>
             </div>
@@ -368,14 +366,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Footer */}
       <footer className="landing-footer">
         <div className="landing-footer-container">
-          <div className="auth-brand-logo" onClick={onNavigateSignup} style={{ cursor: 'pointer' }}>
-            <div className="auth-logo-badge" style={{ width: '26px', height: '26px', fontSize: '0.95rem' }}>
-              in
-            </div>
-            <span className="auth-brand-name" style={{ fontSize: '1rem' }}>
-              LinkedIn Hunter
-            </span>
-            <span className="auth-brand-pill">Pro</span>
+          <div className="auth-brand-logo" onClick={onNavigateSignup} style={{ cursor: 'pointer' }} aria-label="RolePilot Home">
+            <RolePilotLogo variant="compact" height={32} alt="RolePilot" />
           </div>
 
           <div className="auth-footer-links">
@@ -387,7 +379,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           <div style={{ fontSize: '0.8rem', color: 'var(--auth-text-subtle)' }}>
-            © {new Date().getFullYear()} LinkedIn Hunter V2. Modern job search automation.
+            © {new Date().getFullYear()} RolePilot. All rights reserved.
           </div>
         </div>
       </footer>

@@ -1,17 +1,21 @@
 """Profile service for handling user profile, experiences, and skills."""
 
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
-from sqlalchemy import select
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.db.models.education import Education
 from backend.app.db.models.experience import Experience
 from backend.app.db.models.profile import Profile
+from backend.app.db.models.resume import Resume
 from backend.app.db.models.skill import Skill
 from backend.app.schemas.profile import (
     EducationCreate,
     ExperienceCreate,
+    OnboardingRequest,
     ProfileUpdate,
     SkillCreate,
 )
@@ -50,6 +54,96 @@ class ProfileService:
         return profile
 
     @staticmethod
+    def complete_onboarding(
+        db: Session, user_id: uuid.UUID, onboarding_data: OnboardingRequest
+    ) -> Profile:
+        profile = ProfileService.get_or_create_profile(db, user_id)
+
+        first_name = onboarding_data.first_name
+        last_name = onboarding_data.last_name
+        if onboarding_data.full_name:
+            parts = onboarding_data.full_name.strip().split()
+            first_name = parts[0] if parts else (first_name or "Candidate")
+            if len(parts) > 1:
+                last_name = " ".join(parts[1:])
+
+        if first_name:
+            profile.first_name = first_name
+        if last_name is not None:
+            profile.last_name = last_name
+
+        profile.headline = onboarding_data.headline.strip()
+        profile.target_role = onboarding_data.target_role.strip()
+        profile.experience_years = onboarding_data.experience_years
+        if onboarding_data.city:
+            profile.city = onboarding_data.city.strip()
+        if onboarding_data.country:
+            profile.country = onboarding_data.country.strip()
+        if onboarding_data.phone:
+            profile.phone = onboarding_data.phone.strip()
+
+        profile.onboarding_completed = True
+        profile.onboarding_completed_at = datetime.now(timezone.utc)
+
+        # Ensure default SearchConfig exists for target_role
+        from backend.app.db.models.search_config import SearchConfig
+        cfg_stmt = select(SearchConfig).where(SearchConfig.user_id == user_id)
+        existing_cfg = db.execute(cfg_stmt).scalar_one_or_none()
+        if not existing_cfg:
+            new_cfg = SearchConfig(
+                user_id=user_id,
+                keywords=onboarding_data.target_role.strip(),
+                location=profile.city or profile.country or "India",
+            )
+            db.add(new_cfg)
+
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    @staticmethod
+    def finalize_onboarding(
+        db: Session, user_id: uuid.UUID
+    ) -> Profile:
+        profile = ProfileService.get_or_create_profile(db, user_id)
+
+        # 1. Active PDF Resume check
+        resume_stmt = select(Resume).where(Resume.user_id == user_id, Resume.is_active == True)
+        active_resume = db.execute(resume_stmt).scalars().first()
+        if not active_resume:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Active PDF resume is required before completing onboarding.",
+            )
+
+        # 2. Core Technical Skills check
+        if not profile.skills or len(profile.skills) < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one core technical skill is required before completing onboarding.",
+            )
+
+        # 3. Work Experience History check
+        if not profile.experiences or len(profile.experiences) < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one work experience history entry is required before completing onboarding.",
+            )
+
+        # 4. Expected Compensation (CTC) check
+        if profile.expected_ctc is None or float(profile.expected_ctc) <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Positive expected compensation (CTC) is required before completing onboarding.",
+            )
+
+        profile.onboarding_completed = True
+        profile.onboarding_completed_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(profile)
+        return profile
+
+    @staticmethod
     def add_skill(db: Session, user_id: uuid.UUID, skill_in: SkillCreate) -> Skill:
         years = skill_in.years or 0
         months = skill_in.months or 0
@@ -62,19 +156,24 @@ class ProfileService:
             years = int(skill_in.years_of_experience)
             months = int(round((skill_in.years_of_experience - years) * 12))
 
-        # Check if skill already exists for this user
-        stmt = select(Skill).where(Skill.user_id == user_id, Skill.name == skill_in.name)
+        clean_name = skill_in.name.strip()
+        # Case-insensitive duplicate prevention
+        stmt = select(Skill).where(
+            Skill.user_id == user_id,
+            func.lower(Skill.name) == clean_name.lower(),
+        )
         existing = db.execute(stmt).scalar_one_or_none()
         if existing:
             existing.years = years
             existing.months = months
+            existing.name = clean_name
             db.commit()
             db.refresh(existing)
             return existing
 
         skill = Skill(
             user_id=user_id,
-            name=skill_in.name,
+            name=clean_name,
             years=years,
             months=months,
         )
@@ -118,6 +217,31 @@ class ProfileService:
             description=exp_in.description,
         )
         db.add(exp)
+        db.commit()
+        db.refresh(exp)
+        return exp
+
+    @staticmethod
+    def update_experience(
+        db: Session, user_id: uuid.UUID, exp_id: uuid.UUID, exp_in: ExperienceCreate
+    ) -> Optional[Experience]:
+        stmt = select(Experience).where(
+            Experience.id == exp_id, Experience.user_id == user_id
+        )
+        exp = db.execute(stmt).scalar_one_or_none()
+        if not exp:
+            return None
+
+        if exp_in.company_name or exp_in.company:
+            exp.company_name = exp_in.company_name or exp_in.company
+        if exp_in.job_title or exp_in.title:
+            exp.job_title = exp_in.job_title or exp_in.title
+        if exp_in.start_date is not None:
+            exp.start_date = exp_in.start_date
+        exp.end_date = exp_in.end_date
+        if exp_in.description is not None:
+            exp.description = exp_in.description
+
         db.commit()
         db.refresh(exp)
         return exp

@@ -1,96 +1,70 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
+import type { Session, User } from '@supabase/supabase-js';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/authService';
+import { processAuthCallbackOnce, type CallbackAuthClient } from '../services/authCallbackFlow';
 
 interface AuthCallbackPageProps {
-  onNavigateDashboard: () => void;
+  onSuccess: () => void;
   onNavigateLogin: () => void;
+  onNavigateVerifyEmail: (email: string) => void;
 }
 
 export const AuthCallbackPage: React.FC<AuthCallbackPageProps> = ({
-  onNavigateDashboard,
+  onSuccess,
   onNavigateLogin,
+  onNavigateVerifyEmail,
 }) => {
   const { login } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    let isActive = true;
 
     const handleCallback = async () => {
-      // 1. Check URL error parameters (e.g. from OAuth failure or cancellation)
-      const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-
-      const errorMsg =
-        urlParams.get('error_description') ||
-        hashParams.get('error_description') ||
-        urlParams.get('error') ||
-        hashParams.get('error');
-
-      if (errorMsg) {
-        if (isMounted) setError(decodeURIComponent(errorMsg));
-        return;
-      }
-
       if (!supabase) {
-        if (isMounted) setError('Supabase authentication client is not initialized.');
+        setError('Supabase authentication client is not initialized.');
         return;
       }
 
-      try {
-        // 2. Fetch active session established by Supabase redirect
-        const { data, error: sessionErr } = await supabase.auth.getSession();
+      const result = await processAuthCallbackOnce(
+        window.location.href,
+        supabase.auth as unknown as CallbackAuthClient,
+      );
+      if (!isActive) return;
 
-        if (sessionErr) {
-          if (isMounted) setError(sessionErr.message);
-          return;
-        }
-
-        if (data.session) {
-          login(data.session.access_token, data.session, data.session.user);
-          // Clean URL history
-          window.history.replaceState(null, '', '/dashboard');
-          if (isMounted) {
-            onNavigateDashboard();
-          }
-          return;
-        }
-
-        // If no session yet, wait briefly for authStateChange
-        const { data: listener } = supabase.auth.onAuthStateChange(
-          (_event, session) => {
-            if (session?.access_token) {
-              login(session.access_token, session, session.user);
-              window.history.replaceState(null, '', '/dashboard');
-              if (isMounted) {
-                onNavigateDashboard();
-              }
-            }
-          }
-        );
-
-        // Timeout fallback after 4 seconds
-        setTimeout(() => {
-          if (isMounted && !error) {
-            setError('Authentication session could not be established. Please try logging in again.');
-          }
-          listener.subscription.unsubscribe();
-        }, 4000);
-      } catch (err: any) {
-        if (isMounted) {
-          setError(err.message || 'An error occurred during authentication callback.');
-        }
+      if (result.error || !result.session || !result.user) {
+        setUnverifiedEmail(result.unverifiedEmail || null);
+        setError(result.error || 'Authentication did not return a valid session. Please try again.');
+        return;
       }
+
+      login(
+        result.session.access_token,
+        result.session as unknown as Session,
+        result.user as unknown as User,
+      );
+      window.history.replaceState(null, '', '/');
+      onSuccess();
     };
 
-    handleCallback();
+    void handleCallback();
 
     return () => {
-      isMounted = false;
+      isActive = false;
     };
-  }, [login, onNavigateDashboard]);
+  }, [login, onSuccess]);
+
+  const isLinkExpired = error && (
+    error.toLowerCase().includes('expired') ||
+    error.toLowerCase().includes('invalid') ||
+    error.toLowerCase().includes('otp_expired') ||
+    error.toLowerCase().includes('timed out') ||
+    error.toLowerCase().includes('missing its verification credentials') ||
+    error.toLowerCase().includes('no session was returned')
+  );
 
   return (
     <div
@@ -135,24 +109,47 @@ export const AuthCallbackPage: React.FC<AuthCallbackPageProps> = ({
               <AlertCircle size={26} />
             </div>
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 8px', color: '#0F172A' }}>
-              Authentication Failed
+              {isLinkExpired ? 'Verification Link Expired or Invalid' : 'Authentication Failed'}
             </h2>
             <p style={{ fontSize: '0.875rem', color: '#64748B', lineHeight: '1.5', margin: '0 0 24px' }}>
-              {error}
+              {isLinkExpired
+                ? 'This verification link is invalid or has already expired. Please request a fresh verification email to activate your account.'
+                : error}
             </p>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-primary"
-              style={{ height: '42px', fontSize: '0.9rem' }}
-            >
-              <ArrowLeft size={16} />
-              <span>Return to Login</span>
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {unverifiedEmail ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigateVerifyEmail(unverifiedEmail)}
+                  className="auth-btn-primary"
+                  style={{ height: '42px', fontSize: '0.9rem' }}
+                >
+                  <span>Resend Verification Email</span>
+                </button>
+              ) : isLinkExpired ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigateVerifyEmail('')}
+                  className="auth-btn-primary"
+                  style={{ height: '42px', fontSize: '0.9rem' }}
+                >
+                  <span>Request Fresh Verification Email</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onNavigateLogin}
+                className={unverifiedEmail || isLinkExpired ? 'auth-btn-secondary' : 'auth-btn-primary'}
+                style={{ height: '42px', fontSize: '0.9rem' }}
+              >
+                <ArrowLeft size={16} />
+                <span>Return to Login</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div>
-            <Loader2 size={36} className="spin-animation" style={{ color: '#0A66C2', margin: '0 auto 16px' }} />
+            <Loader2 size={36} className="spin-animation" style={{ color: '#1769E8', margin: '0 auto 16px' }} />
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: '0 0 6px', color: '#0F172A' }}>
               Completing Authentication
             </h2>

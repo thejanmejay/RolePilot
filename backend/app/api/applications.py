@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from backend.app.api.policy import require_policy_accepted
 from backend.app.core.security import get_current_user_id
 from backend.app.db.database import get_db
 from backend.app.schemas.application import (
@@ -16,7 +17,11 @@ from backend.app.schemas.application import (
 )
 from backend.app.services.application_service import ApplicationService
 
-router = APIRouter(prefix="/applications", tags=["Applications"])
+router = APIRouter(
+    prefix="/applications",
+    tags=["Applications"],
+    dependencies=[Depends(require_policy_accepted)],
+)
 
 
 @router.get("", response_model=List[ApplicationResponse])

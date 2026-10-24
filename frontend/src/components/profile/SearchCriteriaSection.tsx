@@ -53,7 +53,7 @@ export const SearchCriteriaSection: React.FC<SearchCriteriaSectionProps> = ({
             <span>Search Criteria & Discovery Rules</span>
           </h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Job discovery parameters used by LinkedIn Hunter to scrape and qualify target listings.
+            Job discovery parameters used by RolePilot to scrape and qualify target listings.
           </p>
         </div>
 

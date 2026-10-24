@@ -92,7 +92,7 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
         live_submission_confirmation: !dryRun ? liveConfirmationToken.trim() : undefined,
       });
 
-      showSuccess(dryRun ? 'Hunter dry-run automation started in background!' : 'Hunter LIVE automation started!');
+      showSuccess(dryRun ? 'RolePilot dry-run automation started in background!' : 'RolePilot LIVE automation started!');
       onRunTriggered(run);
       onClose();
     } catch (err) {
@@ -112,7 +112,7 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Launch Hunter Automation Run">
+    <Modal isOpen={isOpen} onClose={onClose} title="Launch RolePilot Automation Run">
       <form onSubmit={handleSubmit}>
         {/* Playwright Worker Intro */}
         <div
@@ -133,7 +133,7 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
           <div>
             <strong>Playwright Automation Worker</strong>
             <p style={{ margin: '4px 0 0 0', lineHeight: '1.4' }}>
-              The Hunter worker searches for jobs matching your criteria, checks candidate qualification, and applies on your behalf.
+              The RolePilot worker searches for jobs matching your criteria, checks candidate qualification, and applies on your behalf.
             </p>
           </div>
         </div>

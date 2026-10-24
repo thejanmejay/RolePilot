@@ -37,6 +37,8 @@ class Profile(Base):
     linkedin_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     website_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    headline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target_role: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     experience_years: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     experience_months: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     notice_period_days: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
@@ -44,6 +46,8 @@ class Profile(Base):
     expected_ctc: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
     authorized_to_work: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     willing_to_relocate: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    onboarding_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

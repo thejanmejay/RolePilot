@@ -98,7 +98,7 @@ export const ProfileReadinessHeader: React.FC<ProfileReadinessHeaderProps> = ({
               {level}
             </span>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Source-of-truth configuration layer for LinkedIn Hunter
+              Source-of-truth configuration layer for RolePilot
             </span>
           </div>
 

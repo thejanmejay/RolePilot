@@ -42,7 +42,12 @@ def create_token(user_id: uuid.UUID) -> str:
 @pytest.fixture
 def auth_headers():
     token = create_token(TEST_USER_ID)
-    return {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}"}
+    # This suite exercises profile features after the user has completed the
+    # policy gate, so record consent through the same API used by the client.
+    acceptance = client.post("/api/v1/policy/accept", headers=headers, json={})
+    assert acceptance.status_code == 200, acceptance.text
+    return headers
 
 
 # =========================================================================

@@ -1,6 +1,9 @@
-# LinkedIn Hunter V2
+# RolePilot
 
-An advanced, intelligent CLI automation tool for LinkedIn job search and Easy Apply application workflows. Built with **Playwright**, **Pydantic**, **Click**, and **Rich**, designed with strict validation, rate-limiting, humanized interactions, and safe form-filling heuristics.
+> **Your Career. Your Next Move.**  
+> Discover opportunities, streamline applications, and manage your job search from one place.
+
+RolePilot is a modern career platform and application assistant for job search and Easy Apply workflows. Built with **FastAPI**, **React/Vite**, **Supabase**, and **Playwright**, designed with strict validation, rate-limiting, humanized interactions, and safe form-filling heuristics.
 
 ---
 

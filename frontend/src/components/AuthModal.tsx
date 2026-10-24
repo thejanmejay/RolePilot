@@ -72,7 +72,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
-                LinkedIn Hunter Authentication
+                RolePilot Authentication
               </h3>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, marginTop: '2px' }}>
                 Connect to FastAPI & Supabase SaaS backend
