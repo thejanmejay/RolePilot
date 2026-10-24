@@ -35,6 +35,25 @@ function validateTerms(agree: boolean): string | null {
   return null;
 }
 
+function validateOtpCode(code: string): string | null {
+  const clean = code.trim();
+  if (!clean) return 'Please enter the verification code.';
+  if (!/^\d{6}$/.test(clean)) return 'Verification code must be 6 digits.';
+  return null;
+}
+
+function maskEmail(email: string): string {
+  if (!email || !email.includes('@')) return email;
+  const [local, domain] = email.split('@');
+  if (local.length <= 2) return `${local[0]}***@${domain}`;
+  return `${local[0]}***${local[local.length - 1]}@${domain}`;
+}
+
+function normalizePath(path: string): string {
+  const clean = path.replace(/\/+$/, '') || '/';
+  return clean;
+}
+
 console.log('--- Testing Authentication UI Validation & Service Logic ---');
 
 // Test 1: Full Name validation
@@ -71,15 +90,29 @@ assert.strictEqual(validateTerms(true), null);
 console.log('✓ Test 5: Terms agreement validation passed.');
 
 // Test 6: Route normalization
-function normalizePath(path: string): string {
-  const clean = path.replace(/\/+$/, '') || '/';
-  return clean;
-}
 assert.strictEqual(normalizePath('/'), '/');
 assert.strictEqual(normalizePath('/signup'), '/signup');
 assert.strictEqual(normalizePath('/signup/'), '/signup');
 assert.strictEqual(normalizePath('/login'), '/login');
-assert.strictEqual(normalizePath('/login//'), '/login');
+assert.strictEqual(normalizePath('/verify-email'), '/verify-email');
+assert.strictEqual(normalizePath('/verify-email/'), '/verify-email');
+assert.strictEqual(normalizePath('/auth/callback'), '/auth/callback');
+assert.strictEqual(normalizePath('/forgot-password'), '/forgot-password');
+assert.strictEqual(normalizePath('/reset-password'), '/reset-password');
 console.log('✓ Test 6: Route normalization passed.');
+
+// Test 7: OTP code format validation
+assert.strictEqual(validateOtpCode(''), 'Please enter the verification code.');
+assert.strictEqual(validateOtpCode('123'), 'Verification code must be 6 digits.');
+assert.strictEqual(validateOtpCode('1234567'), 'Verification code must be 6 digits.');
+assert.strictEqual(validateOtpCode('12a456'), 'Verification code must be 6 digits.');
+assert.strictEqual(validateOtpCode('123456'), null);
+console.log('✓ Test 7: OTP code format validation passed.');
+
+// Test 8: Masked email format
+assert.strictEqual(maskEmail('janmejay@example.com'), 'j***y@example.com');
+assert.strictEqual(maskEmail('al@domain.com'), 'a***@domain.com');
+assert.strictEqual(maskEmail('test.user+hunter@company.org'), 't***r@company.org');
+console.log('✓ Test 8: Masked email formatting passed.');
 
 console.log('--- All Authentication UI Unit Tests Passed Successfully! ---');

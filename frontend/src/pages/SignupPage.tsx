@@ -3,6 +3,7 @@ import { UserPlus, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
+import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 
@@ -10,12 +11,14 @@ interface SignupPageProps {
   onNavigateLogin: () => void;
   onNavigateHome: () => void;
   onNavigateDashboard: () => void;
+  onNavigateVerifyEmail: (email: string) => void;
 }
 
 export const SignupPage: React.FC<SignupPageProps> = ({
   onNavigateLogin,
   onNavigateHome,
   onNavigateDashboard,
+  onNavigateVerifyEmail,
 }) => {
   const { login } = useAuth();
 
@@ -34,7 +37,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
 
   const validateField = (field: string, value: string): string => {
     switch (field) {
@@ -143,21 +145,20 @@ export const SignupPage: React.FC<SignupPageProps> = ({
         return;
       }
 
-      if (res.requiresEmailConfirmation) {
-        setEmailConfirmationRequired(true);
-        setSuccessMessage(
-          `Confirmation email sent to ${email}. Please verify your email to log in.`
-        );
-        setIsSubmitting(false);
+      if (res.requiresEmailVerification) {
+        setSuccessMessage('Account created! Redirecting to email verification...');
+        setTimeout(() => {
+          onNavigateVerifyEmail(email.trim());
+        }, 600);
         return;
       }
 
       if (res.token) {
-        login(res.token);
+        login(res.token, res.session, res.user);
         setSuccessMessage('Account created successfully! Redirecting...');
         setTimeout(() => {
           onNavigateDashboard();
-        }, 800);
+        }, 600);
       }
     } catch (err: any) {
       setGeneralError(err.message || 'An unexpected error occurred during signup.');
@@ -174,180 +175,156 @@ export const SignupPage: React.FC<SignupPageProps> = ({
       onFooterAction={onNavigateLogin}
       onNavigateHome={onNavigateHome}
     >
-      {/* Confirmation Required Notice */}
-      {emailConfirmationRequired ? (
-        <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <div
-            style={{
-              width: '52px',
-              height: '52px',
-              borderRadius: '50%',
-              backgroundColor: '#DCFCE7',
-              color: '#16A34A',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}
-          >
-            <CheckCircle size={28} />
+      <GoogleAuthButton
+        label="Sign up with Google"
+        onError={(err) => setGeneralError(err)}
+        disabled={isSubmitting}
+      />
+
+      <div className="auth-divider">
+        <span>or continue with email</span>
+      </div>
+
+      <form onSubmit={handleSubmit} className="auth-form" noValidate>
+        {generalError && (
+          <div role="alert" className="auth-alert auth-alert-error">
+            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>{generalError}</div>
           </div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 8px', color: 'var(--auth-text-main)' }}>
-            Check your email
-          </h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--auth-text-muted)', lineHeight: '1.5', margin: '0 0 24px' }}>
-            {successMessage}
-          </p>
-          <button
-            type="button"
-            onClick={onNavigateLogin}
-            className="auth-btn-primary"
-          >
-            Proceed to Log In
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          {generalError && (
-            <div role="alert" className="auth-alert auth-alert-error">
-              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-              <div>{generalError}</div>
-            </div>
-          )}
+        )}
 
-          {successMessage && (
-            <div role="status" className="auth-alert auth-alert-success">
-              <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-              <div>{successMessage}</div>
-            </div>
-          )}
+        {successMessage && (
+          <div role="status" className="auth-alert auth-alert-success">
+            <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>{successMessage}</div>
+          </div>
+        )}
 
-          <FormField
-            id="signup-fullname"
-            label="Full name"
-            type="text"
-            required
-            autoComplete="name"
-            placeholder="e.g. Alex Morgan"
-            value={fullName}
-            error={touched.fullName ? errors.fullName : undefined}
-            onChange={(e) => handleChange('fullName', e.target.value)}
-            onBlur={(e) => handleBlur('fullName', e.target.value)}
-            disabled={isSubmitting}
-          />
+        <FormField
+          id="signup-fullname"
+          label="Full name"
+          type="text"
+          required
+          autoComplete="name"
+          placeholder="e.g. Alex Morgan"
+          value={fullName}
+          error={touched.fullName ? errors.fullName : undefined}
+          onChange={(e) => handleChange('fullName', e.target.value)}
+          onBlur={(e) => handleBlur('fullName', e.target.value)}
+          disabled={isSubmitting}
+        />
 
-          <FormField
-            id="signup-email"
-            label="Email address"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="you@company.com"
-            value={email}
-            error={touched.email ? errors.email : undefined}
-            onChange={(e) => handleChange('email', e.target.value)}
-            onBlur={(e) => handleBlur('email', e.target.value)}
-            disabled={isSubmitting}
-          />
+        <FormField
+          id="signup-email"
+          label="Email address"
+          type="email"
+          required
+          autoComplete="email"
+          placeholder="you@company.com"
+          value={email}
+          error={touched.email ? errors.email : undefined}
+          onChange={(e) => handleChange('email', e.target.value)}
+          onBlur={(e) => handleBlur('email', e.target.value)}
+          disabled={isSubmitting}
+        />
 
-          <PasswordField
-            id="signup-password"
-            label="Password"
-            required
-            autoComplete="new-password"
-            placeholder="At least 8 characters"
-            helperText="Minimum 8 characters"
-            value={password}
-            error={touched.password ? errors.password : undefined}
-            onChange={(e) => handleChange('password', e.target.value)}
-            onBlur={(e) => handleBlur('password', e.target.value)}
-            disabled={isSubmitting}
-          />
+        <PasswordField
+          id="signup-password"
+          label="Password"
+          required
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
+          helperText="Minimum 8 characters"
+          value={password}
+          error={touched.password ? errors.password : undefined}
+          onChange={(e) => handleChange('password', e.target.value)}
+          onBlur={(e) => handleBlur('password', e.target.value)}
+          disabled={isSubmitting}
+        />
 
-          <PasswordField
-            id="signup-confirm-password"
-            label="Confirm password"
-            required
-            autoComplete="new-password"
-            placeholder="Re-enter password"
-            value={confirmPassword}
-            error={touched.confirmPassword ? errors.confirmPassword : undefined}
-            onChange={(e) => handleChange('confirmPassword', e.target.value)}
-            onBlur={(e) => handleBlur('confirmPassword', e.target.value)}
-            disabled={isSubmitting}
-          />
+        <PasswordField
+          id="signup-confirm-password"
+          label="Confirm password"
+          required
+          autoComplete="new-password"
+          placeholder="Re-enter password"
+          value={confirmPassword}
+          error={touched.confirmPassword ? errors.confirmPassword : undefined}
+          onChange={(e) => handleChange('confirmPassword', e.target.value)}
+          onBlur={(e) => handleBlur('confirmPassword', e.target.value)}
+          disabled={isSubmitting}
+        />
 
-          {/* Terms & Privacy acceptance checkbox */}
-          <div>
-            <label className="auth-checkbox-row" htmlFor="signup-terms">
-              <input
-                id="signup-terms"
-                type="checkbox"
-                checked={agreeTerms}
-                onChange={(e) => {
-                  setAgreeTerms(e.target.checked);
-                  if (touched.terms) {
-                    setErrors((prev) => ({
-                      ...prev,
-                      terms: !e.target.checked
-                        ? 'You must agree to the Terms and Privacy Policy.'
-                        : '',
-                    }));
-                  }
+        {/* Terms & Privacy acceptance checkbox */}
+        <div>
+          <label className="auth-checkbox-row" htmlFor="signup-terms">
+            <input
+              id="signup-terms"
+              type="checkbox"
+              checked={agreeTerms}
+              onChange={(e) => {
+                setAgreeTerms(e.target.checked);
+                if (touched.terms) {
+                  setErrors((prev) => ({
+                    ...prev,
+                    terms: !e.target.checked
+                      ? 'You must agree to the Terms and Privacy Policy.'
+                      : '',
+                  }));
+                }
+              }}
+              className="auth-checkbox"
+              disabled={isSubmitting}
+            />
+            <span className="auth-checkbox-label">
+              I agree to the{' '}
+              <a
+                href="#terms"
+                onClick={(e) => {
+                  e.preventDefault();
                 }}
-                className="auth-checkbox"
-                disabled={isSubmitting}
-              />
-              <span className="auth-checkbox-label">
-                I agree to the{' '}
-                <a
-                  href="#terms"
-                  onClick={(e) => {
-                    e.preventDefault();
-                  }}
-                >
-                  Terms of Service
-                </a>{' '}
-                and{' '}
-                <a
-                  href="#privacy"
-                  onClick={(e) => {
-                    e.preventDefault();
-                  }}
-                >
-                  Privacy Policy
-                </a>
-                .
-              </span>
-            </label>
-            {touched.terms && errors.terms && (
-              <div role="alert" className="auth-field-error" style={{ marginTop: '4px' }}>
-                <AlertCircle size={14} />
-                <span>{errors.terms}</span>
-              </div>
-            )}
-          </div>
+              >
+                Terms of Service
+              </a>{' '}
+              and{' '}
+              <a
+                href="#privacy"
+                onClick={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                Privacy Policy
+              </a>
+              .
+            </span>
+          </label>
+          {touched.terms && errors.terms && (
+            <div role="alert" className="auth-field-error" style={{ marginTop: '4px' }}>
+              <AlertCircle size={14} />
+              <span>{errors.terms}</span>
+            </div>
+          )}
+        </div>
 
-          <button
-            type="submit"
-            className="auth-btn-primary"
-            disabled={isSubmitting}
-            id="create-account-submit-btn"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 size={18} className="spin-animation" />
-                <span>Creating account...</span>
-              </>
-            ) : (
-              <>
-                <UserPlus size={18} />
-                <span>Create account</span>
-              </>
-            )}
-          </button>
-        </form>
-      )}
+        <button
+          type="submit"
+          className="auth-btn-primary"
+          disabled={isSubmitting}
+          id="create-account-submit-btn"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 size={18} className="spin-animation" />
+              <span>Creating account...</span>
+            </>
+          ) : (
+            <>
+              <UserPlus size={18} />
+              <span>Create account</span>
+            </>
+          )}
+        </button>
+      </form>
     </AuthLayout>
   );
 };

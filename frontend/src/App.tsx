@@ -11,6 +11,11 @@ import { AutomationPage } from './pages/AutomationPage';
 import { LandingPage } from './pages/LandingPage';
 import { SignupPage } from './pages/SignupPage';
 import { LoginPage } from './pages/LoginPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { AuthCallbackPage } from './pages/AuthCallbackPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { Loader2 } from 'lucide-react';
 
 function normalizePath(path: string): string {
   const clean = path.replace(/\/+$/, '') || '/';
@@ -18,7 +23,7 @@ function normalizePath(path: string): string {
 }
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() =>
     normalizePath(window.location.pathname)
   );
@@ -78,8 +83,76 @@ function AppContent() {
     navigate('/applications');
   };
 
-  // Route Dispatching:
-  // 1. Explicit /signup route
+  // Avoid flashing while restoring Supabase session on initial load
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          backgroundColor: '#F8FAFC',
+          color: '#64748B',
+        }}
+      >
+        <Loader2 size={32} className="spin-animation" style={{ color: '#0A66C2' }} />
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Connecting to LinkedIn Hunter...</span>
+      </div>
+    );
+  }
+
+  // 1. Explicit /auth/callback route (OAuth & Email link redirects)
+  if (currentPath === '/auth/callback') {
+    return (
+      <AuthCallbackPage
+        onNavigateDashboard={() => {
+          navigate('/dashboard');
+          setCurrentTab('dashboard');
+        }}
+        onNavigateLogin={() => navigate('/login')}
+      />
+    );
+  }
+
+  // 2. Explicit /verify-email route (Email OTP confirmation)
+  if (currentPath === '/verify-email') {
+    return (
+      <VerifyEmailPage
+        onNavigateLogin={() => navigate('/login')}
+        onNavigateSignup={() => navigate('/signup')}
+        onNavigateHome={() => navigate('/')}
+        onNavigateDashboard={() => {
+          navigate('/dashboard');
+          setCurrentTab('dashboard');
+        }}
+      />
+    );
+  }
+
+  // 3. Explicit /forgot-password route
+  if (currentPath === '/forgot-password') {
+    return (
+      <ForgotPasswordPage
+        onNavigateLogin={() => navigate('/login')}
+        onNavigateHome={() => navigate('/')}
+      />
+    );
+  }
+
+  // 4. Explicit /reset-password route
+  if (currentPath === '/reset-password') {
+    return (
+      <ResetPasswordPage
+        onNavigateLogin={() => navigate('/login')}
+        onNavigateHome={() => navigate('/')}
+      />
+    );
+  }
+
+  // 5. Explicit /signup route
   if (currentPath === '/signup') {
     return (
       <SignupPage
@@ -89,11 +162,14 @@ function AppContent() {
           navigate('/dashboard');
           setCurrentTab('dashboard');
         }}
+        onNavigateVerifyEmail={(email) => {
+          navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        }}
       />
     );
   }
 
-  // 2. Explicit /login route
+  // 6. Explicit /login route
   if (currentPath === '/login') {
     return (
       <LoginPage
@@ -103,11 +179,15 @@ function AppContent() {
           navigate('/dashboard');
           setCurrentTab('dashboard');
         }}
+        onNavigateForgotPassword={() => navigate('/forgot-password')}
+        onNavigateVerifyEmail={(email) => {
+          navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        }}
       />
     );
   }
 
-  // 3. Pre-signup Landing Page (Route '/' when not authenticated)
+  // 7. Pre-signup Landing Page (Route '/' when not authenticated)
   if (currentPath === '/' && !isAuthenticated) {
     return (
       <LandingPage
@@ -117,7 +197,7 @@ function AppContent() {
     );
   }
 
-  // 4. Authenticated Application Pages (or redirected to login if unauthenticated on private routes)
+  // 8. Unauthenticated access to protected routes -> Redirect to Login
   if (!isAuthenticated && currentPath !== '/') {
     return (
       <LoginPage
@@ -127,11 +207,15 @@ function AppContent() {
           navigate('/dashboard');
           setCurrentTab('dashboard');
         }}
+        onNavigateForgotPassword={() => navigate('/forgot-password')}
+        onNavigateVerifyEmail={(email) => {
+          navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        }}
       />
     );
   }
 
-  // Authenticated state on '/' or '/dashboard', '/profile', etc.
+  // 9. Authenticated state on '/' or '/dashboard', '/profile', etc.
   return (
     <AppLayout currentTab={currentTab} onTabChange={handleTabChange}>
       {currentTab === 'dashboard' && (

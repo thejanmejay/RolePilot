@@ -18,11 +18,15 @@ BUILTIN_PATTERNS: list[tuple[str, str]] = [
     (r"(?i)(require|need|will you need).*(sponsor|visa|h-?1b)", "sponsorship_required"),
     # Relocation
     (r"(?i)(willing|open|able).*(relocat|move)", "willing_to_relocate"),
+    # Current Salary / CTC in LPA
+    (r"(?i)(current|present).*(salary|compensation|pay|ctc).*(\(in lakhs|in lakh|lpa|\blacs?\b)", "_current_salary_lpa"),
+    # Desired / Expected Salary / CTC in LPA
+    (r"(?i)(expected|desired|target).*(salary|compensation|pay|ctc).*(\(in lakhs|in lakh|lpa|\blacs?\b)", "_desired_salary_lpa"),
     # Current Salary / CTC
-    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|lacs?)).*(current|present).*(salary|compensation|pay|ctc)", "current_salary"),
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b)).*(current|present).*(salary|compensation|pay|ctc)", "current_salary"),
     # Desired / Expected Salary / CTC
-    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|lacs?)).*(expected|desired|target).*(salary|compensation|pay|ctc)", "desired_salary"),
-    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|lacs?|current|present)).*(salary|compensation|pay|ctc)", "desired_salary"),
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b)).*(expected|desired|target).*(salary|compensation|pay|ctc)", "desired_salary"),
+    (r"(?i)^(?!.*(in-hand|take-home|lakh|lpa|\blacs?\b|current|present)).*(salary|compensation|pay|ctc)", "desired_salary"),
     # How did you hear — multi-language
     (r"(?i)how.*(hear|learn|find).*(about|of|this)", "how_did_you_hear"),
     (r"(?i)c[oó]mo.*(enterar|conocer|supiste|enteraste)", "how_did_you_hear"),  # Spanish
@@ -280,6 +284,11 @@ def match_answer(
     # 2. Check builtin answer patterns
     for pattern, field_name in BUILTIN_PATTERNS:
         if re.search(pattern, question_text):
+            if field_name == "_current_salary_lpa":
+                return _convert_to_lpa(answers.current_salary)
+            if field_name == "_desired_salary_lpa":
+                return _convert_to_lpa(answers.desired_salary)
+
             value = getattr(answers, field_name, None)
             if value is not None:
                 result = _format_answer(value)
@@ -294,8 +303,31 @@ def match_answer(
                 log.debug("Profile pattern matched: %s -> %s", field_name, value)
                 return str(value)
 
+    # 4. Check if this is a recognized Yes/No question
+    yn = match_yes_no(question_text, answers)
+    if yn is True:
+        log.debug("Yes/No fallback matched Yes for: %s", question_text[:80])
+        return "Yes"
+    if yn is False:
+        log.debug("Yes/No fallback matched No for: %s", question_text[:80])
+        return "No"
+
     log.debug("No pattern matched for question: %s", question_text[:80])
     return None
+
+
+def _convert_to_lpa(val: str) -> str:
+    """Convert an INR salary amount to LPA (Lakhs Per Annum)."""
+    try:
+        clean = re.sub(r"[^\d.]", "", str(val))
+        num = float(clean)
+        if num >= 1000:
+            lpa = num / 100000.0
+            formatted = f"{lpa:.2f}".rstrip("0").rstrip(".")
+            return formatted
+        return str(val)
+    except Exception:
+        return str(val)
 
 
 def match_yes_no(question_text: str, answers: AnswersConfig) -> Optional[bool]:

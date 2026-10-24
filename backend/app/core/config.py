@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = Field(default="", validation_alias="SUPABASE_ANON_KEY")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", validation_alias="SUPABASE_SERVICE_ROLE_KEY")
     SUPABASE_JWT_SECRET: str = Field(default="", validation_alias="SUPABASE_JWT_SECRET")
+    SUPABASE_JWKS_URL: str = Field(default="", validation_alias="SUPABASE_JWKS_URL")
+    FRONTEND_ORIGIN: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_ORIGIN")
     
     # Database Configuration (PostgreSQL / Supabase)
     DATABASE_URL: str = Field(

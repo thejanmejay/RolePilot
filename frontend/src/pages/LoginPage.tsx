@@ -3,20 +3,24 @@ import { LogIn, AlertCircle, CheckCircle, Loader2, Key, Terminal, ChevronDown, C
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
+import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
-import { Modal } from '../components/Modal';
 
 interface LoginPageProps {
   onNavigateSignup: () => void;
   onNavigateHome: () => void;
   onNavigateDashboard: () => void;
+  onNavigateForgotPassword: () => void;
+  onNavigateVerifyEmail: (email: string) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   onNavigateSignup,
   onNavigateHome,
   onNavigateDashboard,
+  onNavigateForgotPassword,
+  onNavigateVerifyEmail,
 }) => {
   const { login } = useAuth();
 
@@ -33,12 +37,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  // Password Reset Modal states
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetStatus, setResetStatus] = useState<{ message?: string; error?: string } | null>(null);
-  const [isResetSubmitting, setIsResetSubmitting] = useState(false);
 
   // Developer token access state
   const [isDevTokenOpen, setIsDevTokenOpen] = useState(false);
@@ -104,50 +102,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       const res = await authService.signIn({
         email: email.trim(),
         password,
-        rememberMe,
       });
 
       if (!res.success) {
+        if (res.requiresEmailVerification) {
+          setGeneralError(res.error || 'Your email is not verified yet.');
+          setTimeout(() => {
+            onNavigateVerifyEmail(email.trim());
+          }, 1000);
+          return;
+        }
+
         setGeneralError(res.error || 'Invalid email or password.');
         setIsSubmitting(false);
         return;
       }
 
       if (res.token) {
-        login(res.token);
+        login(res.token, res.session, res.user);
         setSuccessMessage('Signed in successfully! Redirecting to dashboard...');
         setTimeout(() => {
           onNavigateDashboard();
-        }, 600);
+        }, 500);
       }
     } catch (err: any) {
       setGeneralError(err.message || 'An unexpected error occurred during sign in.');
       setIsSubmitting(false);
-    }
-  };
-
-  const handlePasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const emailToReset = resetEmail.trim() || email.trim();
-    if (!emailToReset) {
-      setResetStatus({ error: 'Please enter your account email address.' });
-      return;
-    }
-
-    setIsResetSubmitting(true);
-    setResetStatus(null);
-
-    try {
-      const res = await authService.resetPassword(emailToReset);
-      if (res.success) {
-        setResetStatus({ message: res.message });
-      } else {
-        setResetStatus({ error: res.error });
-      }
-    } catch (err: any) {
-      setResetStatus({ error: err.message || 'Failed to submit password recovery.' });
-    } finally {
-      setIsResetSubmitting(false);
     }
   };
 
@@ -183,6 +163,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       onFooterAction={onNavigateSignup}
       onNavigateHome={onNavigateHome}
     >
+      <GoogleAuthButton
+        label="Continue with Google"
+        onError={(err) => setGeneralError(err)}
+        disabled={isSubmitting}
+      />
+
+      <div className="auth-divider">
+        <span>or sign in with email</span>
+      </div>
+
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
         {generalError && (
           <div role="alert" className="auth-alert auth-alert-error">
@@ -241,11 +231,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
             <button
               type="button"
-              onClick={() => {
-                setResetEmail(email);
-                setResetStatus(null);
-                setIsResetModalOpen(true);
-              }}
+              onClick={onNavigateForgotPassword}
               className="auth-text-link"
               id="forgot-password-link"
             >
@@ -348,64 +334,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           </div>
         )}
       </div>
-
-      {/* Forgot Password Recovery Modal */}
-      <Modal
-        isOpen={isResetModalOpen}
-        onClose={() => setIsResetModalOpen(false)}
-        title="Reset your password"
-        maxWidth="440px"
-      >
-        <form onSubmit={handlePasswordReset} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <p style={{ fontSize: '0.875rem', color: 'var(--auth-text-muted)', margin: 0, lineHeight: '1.5' }}>
-            Enter your account email address. We will verify your account and send a password recovery link.
-          </p>
-
-          {resetStatus?.error && (
-            <div role="alert" className="auth-alert auth-alert-error" style={{ padding: '10px 12px' }}>
-              <AlertCircle size={16} />
-              <span>{resetStatus.error}</span>
-            </div>
-          )}
-
-          {resetStatus?.message && (
-            <div role="status" className="auth-alert auth-alert-success" style={{ padding: '10px 12px' }}>
-              <CheckCircle size={16} />
-              <span>{resetStatus.message}</span>
-            </div>
-          )}
-
-          <FormField
-            id="reset-email"
-            label="Account Email"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="you@company.com"
-            value={resetEmail}
-            onChange={(e) => setResetEmail(e.target.value)}
-            disabled={isResetSubmitting}
-          />
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-            <button
-              type="button"
-              onClick={() => setIsResetModalOpen(false)}
-              className="auth-btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="landing-btn-hero-primary"
-              style={{ height: '40px', padding: '0 16px', fontSize: '0.875rem' }}
-              disabled={isResetSubmitting}
-            >
-              {isResetSubmitting ? 'Sending link...' : 'Send reset link'}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </AuthLayout>
   );
 };
