@@ -129,6 +129,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               onClick={() => {
                 logout();
                 setIsMobileMenuOpen(false);
+                window.history.pushState(null, '', '/');
+                window.dispatchEvent(new PopStateEvent('popstate'));
               }}
               className="sidebar-footer-btn danger"
             >
@@ -285,6 +287,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 onClick={() => {
                   logout();
                   setIsSettingsOpen(false);
+                  window.history.pushState(null, '', '/');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
                 }}
                 className="btn btn-outline"
                 style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
