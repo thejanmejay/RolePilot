@@ -53,6 +53,7 @@ class ApplyConfig(BaseModel):
     blacklist_title: list[str] = Field(default_factory=list)
     blacklist_companies: list[str] = Field(default_factory=list)
     follow_company: bool = False
+    allow_live_submission: bool = False
 
 
 class CustomAnswer(BaseModel):
@@ -64,6 +65,7 @@ class AnswersConfig(BaseModel):
     sponsorship_required: bool = False
     authorized_to_work: bool = True
     willing_to_relocate: bool = True
+    current_salary: str = "0"
     desired_salary: str = "0"
     how_did_you_hear: str = "LinkedIn"
     cover_letter: str = ""
