@@ -163,3 +163,79 @@ def test_new_policy_version_requires_reacceptance(monkeypatch):
     # Protected features blocked until draft-2 is accepted
     r_profile = client.get("/api/v1/profile", headers=headers)
     assert r_profile.status_code == 403
+
+
+def test_cors_options_preflight_production_frontend():
+    """OPTIONS preflight for production frontend https://rolepilot-frontend-phi.vercel.app succeeds."""
+    r = client.options(
+        "/api/v1/policy/accept",
+        headers={
+            "Origin": "https://rolepilot-frontend-phi.vercel.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://rolepilot-frontend-phi.vercel.app"
+    assert r.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_cors_options_preflight_localhost_development():
+    """OPTIONS preflight for localhost development origins succeeds."""
+    for origin in ("http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"):
+        r = client.options(
+            "/api/v1/policy/acceptance-status",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        assert r.status_code == 200
+        assert r.headers.get("access-control-allow-origin") == origin
+        assert r.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_cors_options_preflight_vercel_preview_domains():
+    """OPTIONS preflight for Vercel preview environments succeeds via regex matching."""
+    preview_origin = "https://rolepilot-frontend-branch-test.vercel.app"
+    r = client.options(
+        "/api/v1/policy/accept",
+        headers={
+            "Origin": preview_origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == preview_origin
+
+
+def test_cors_options_preflight_disallows_unauthorized_origin():
+    """OPTIONS preflight for unknown external origins is rejected."""
+    r = client.options(
+        "/api/v1/policy/accept",
+        headers={
+            "Origin": "https://malicious-site.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_cors_origins_setting_assembler():
+    """Settings assemble_cors_origins correctly handles strings, lists, and preserves required origins."""
+    from backend.app.core.config import Settings
+
+    # Even if environment specifies single custom origin or JSON string
+    s_json = Settings(CORS_ORIGINS='["https://custom-origin.com"]')
+    assert "https://rolepilot-frontend-phi.vercel.app" in s_json.CORS_ORIGINS
+    assert "https://custom-origin.com" in s_json.CORS_ORIGINS
+    assert "http://localhost:3000" in s_json.CORS_ORIGINS
+
+    # Wildcards must be stripped to prevent credentialed CORS rejection
+    s_wildcard = Settings(CORS_ORIGINS='*')
+    assert "*" not in s_wildcard.CORS_ORIGINS
+    assert "https://rolepilot-frontend-phi.vercel.app" in s_wildcard.CORS_ORIGINS
+

@@ -18,6 +18,20 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { PolicyAcceptancePage } from './pages/PolicyAcceptancePage';
 import { OnboardingPage } from './pages/OnboardingPage';
+import { AboutPage } from './pages/AboutPage';
+import { TermsPage } from './pages/TermsPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { GuidelinesPage } from './pages/GuidelinesPage';
+import { SupportPage } from './pages/SupportPage';
+import { BlogListPage } from './pages/BlogListPage';
+import { BlogPostPage } from './pages/BlogPostPage';
+import { ContactPage } from './pages/ContactPage';
+import { PricingPage } from './pages/PricingPage';
+import { CareersPage } from './pages/CareersPage';
+import { AccessibilityPage } from './pages/AccessibilityPage';
+import { FeaturesPage } from './pages/FeaturesPage';
+import { IntegrationsPage } from './pages/IntegrationsPage';
+import { SecurityPage } from './pages/SecurityPage';
 import { Loader2 } from 'lucide-react';
 import { resolvePostAuthRoute } from './utils/postAuthRoute';
 
@@ -25,6 +39,32 @@ function normalizePath(path: string): string {
   const clean = path.replace(/\/+$/, '') || '/';
   return clean;
 }
+
+const PUBLIC_ROUTES = [
+  '/',
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/about',
+  '/terms',
+  '/privacy',
+  '/guidelines',
+  '/support',
+  '/blog',
+  '/guides',
+  '/contact',
+  '/pricing',
+  '/careers',
+  '/accessibility',
+  '/features',
+  '/integrations',
+  '/security',
+];
+const isPublicRoute = (path: string) => {
+  const norm = normalizePath(path);
+  return PUBLIC_ROUTES.includes(norm) || norm.startsWith('/blog/');
+};
 
 function AppContent() {
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
@@ -94,20 +134,31 @@ function AppContent() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Enforce onboarding flow transitions for authenticated users
+  // Enforce onboarding flow transitions and authenticated / unauthenticated guards
   useEffect(() => {
     if (postAuthRoute === 'onboarding' && currentPath !== '/onboarding') {
       navigate('/onboarding');
     } else if (
       postAuthRoute === 'dashboard' &&
-      ['/login', '/signup', '/verify-email', '/auth/callback', '/onboarding', '/'].includes(currentPath)
+      ['/login', '/signup', '/verify-email', '/auth/callback', '/onboarding'].includes(currentPath)
     ) {
       setCurrentTab('dashboard');
       navigate('/dashboard');
+    } else if (
+      !isAuthenticated &&
+      !isAuthLoading &&
+      !isPublicRoute(currentPath) &&
+      currentPath !== '/verify-email' &&
+      currentPath !== '/auth/callback'
+    ) {
+      // Unauthenticated visitor attempting to access a protected route (e.g. after storage clear)
+      navigate('/');
     }
   }, [
     postAuthRoute,
     currentPath,
+    isAuthenticated,
+    isAuthLoading,
     navigate,
   ]);
 
@@ -128,8 +179,28 @@ function AppContent() {
     navigate('/applications');
   };
 
-  // 1. Initial auth restoration loader
-  if (postAuthRoute === 'auth-loading') {
+  const publicNavProps = {
+    onNavigateHome: () => navigate('/'),
+    onNavigateLogin: () => navigate('/login'),
+    onNavigateSignup: () => navigate('/signup'),
+    onNavigateAbout: () => navigate('/about'),
+    onNavigateTerms: () => navigate('/terms'),
+    onNavigatePrivacy: () => navigate('/privacy'),
+    onNavigateGuidelines: () => navigate('/guidelines'),
+    onNavigateSupport: () => navigate('/support'),
+    onNavigateBlog: () => navigate('/blog'),
+    onNavigateFeatures: () => navigate('/features'),
+    onNavigatePricing: () => navigate('/pricing'),
+    onNavigateCareers: () => navigate('/careers'),
+    onNavigateAccessibility: () => navigate('/accessibility'),
+    onNavigateSecurity: () => navigate('/security'),
+    onNavigateIntegrations: () => navigate('/integrations'),
+    onNavigateContact: () => navigate('/contact'),
+  };
+
+  // 1. Initial auth restoration loader - ONLY on protected routes while restoring session!
+  // Public routes (/, /login, /signup, /forgot-password, /reset-password) must never be blocked by auth loading!
+  if (postAuthRoute === 'auth-loading' && !isPublicRoute(currentPath)) {
     return (
       <div
         style={{
@@ -169,6 +240,8 @@ function AppContent() {
         onNavigateLogin={() => navigate('/login')}
         onNavigateSignup={() => navigate('/signup')}
         onNavigateHome={() => navigate('/')}
+        onNavigateTerms={() => navigate('/terms')}
+        onNavigatePrivacy={() => navigate('/privacy')}
       />
     );
   }
@@ -179,6 +252,8 @@ function AppContent() {
       <ForgotPasswordPage
         onNavigateLogin={() => navigate('/login')}
         onNavigateHome={() => navigate('/')}
+        onNavigateTerms={() => navigate('/terms')}
+        onNavigatePrivacy={() => navigate('/privacy')}
       />
     );
   }
@@ -191,11 +266,89 @@ function AppContent() {
         onNavigateLogin={() => navigate('/login')}
         onNavigateHome={() => navigate('/')}
         onNavigateForgotPassword={() => navigate('/forgot-password')}
+        onNavigateTerms={() => navigate('/terms')}
+        onNavigatePrivacy={() => navigate('/privacy')}
       />
     );
   }
 
-  // 6. Unauthenticated handling
+  // 6. Informational, Legal, Support & Product Routes
+  if (currentPath === '/about') {
+    return <AboutPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/terms') {
+    return <TermsPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/privacy') {
+    return <PrivacyPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/guidelines') {
+    return <GuidelinesPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/support') {
+    return <SupportPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/contact') {
+    return <ContactPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/pricing') {
+    return <PricingPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/careers') {
+    return <CareersPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/accessibility') {
+    return <AccessibilityPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/features') {
+    return <FeaturesPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/integrations') {
+    return <IntegrationsPage {...publicNavProps} />;
+  }
+
+  if (currentPath === '/security') {
+    return <SecurityPage {...publicNavProps} />;
+  }
+
+  // 7. Public Blog Listing at '/blog' or alias '/guides'
+  if (currentPath === '/blog' || currentPath === '/guides') {
+    return (
+      <BlogListPage
+        {...publicNavProps}
+        onNavigateBlogPost={(slug) => navigate(`/blog/${slug}`)}
+      />
+    );
+  }
+
+  // 8. Individual Blog Article at '/blog/:slug'
+  if (currentPath.startsWith('/blog/')) {
+    const slug = currentPath.slice('/blog/'.length);
+    return (
+      <BlogPostPage
+        slug={slug}
+        {...publicNavProps}
+        onNavigateBlogPost={(targetSlug) => navigate(`/blog/${targetSlug}`)}
+      />
+    );
+  }
+
+  // 9. Public Landing Page at '/' for unauthenticated visitors
+  if (currentPath === '/' && !isAuthenticated) {
+    return <LandingPage {...publicNavProps} />;
+  }
+
+  // 10. Unauthenticated handling for login / signup pages
   if (!isAuthenticated) {
     // If user has an unverified session, ensure they remain in verification flow
     if (user && !user.email_confirmed_at) {
@@ -206,6 +359,8 @@ function AppContent() {
           onNavigateLogin={() => navigate('/login')}
           onNavigateSignup={() => navigate('/signup')}
           onNavigateHome={() => navigate('/')}
+          onNavigateTerms={() => navigate('/terms')}
+          onNavigatePrivacy={() => navigate('/privacy')}
         />
       );
     }
@@ -216,6 +371,8 @@ function AppContent() {
           onSuccess={routeUserAfterAuth}
           onNavigateLogin={() => navigate('/login')}
           onNavigateHome={() => navigate('/')}
+          onNavigateTerms={() => navigate('/terms')}
+          onNavigatePrivacy={() => navigate('/privacy')}
           onNavigateVerifyEmail={(email) => {
             navigate(`/verify-email?email=${encodeURIComponent(email)}`);
           }}
@@ -224,20 +381,17 @@ function AppContent() {
     }
 
     if (currentPath === '/') {
-      return (
-        <LandingPage
-          onNavigateSignup={() => navigate('/signup')}
-          onNavigateLogin={() => navigate('/login')}
-        />
-      );
+      return <LandingPage {...publicNavProps} />;
     }
 
-    // Default to Login for protected routes when logged out
+    // Default to Login for other routes when logged out
     return (
       <LoginPage
         onSuccess={routeUserAfterAuth}
         onNavigateSignup={() => navigate('/signup')}
         onNavigateHome={() => navigate('/')}
+        onNavigateTerms={() => navigate('/terms')}
+        onNavigatePrivacy={() => navigate('/privacy')}
         onNavigateForgotPassword={() => navigate('/forgot-password')}
         onNavigateVerifyEmail={(email) => {
           navigate(`/verify-email?email=${encodeURIComponent(email)}`);

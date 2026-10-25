@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import { policyService, type PolicyStatus } from '../services/policyService';
+import { formatErrorMessage } from '../api/client';
 import { ACTIVE_POLICY } from '../components/policy/policyContent';
 
 export interface PolicyContextType {
@@ -56,6 +57,22 @@ export const PolicyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isAuthenticated, checkPolicyStatus]);
 
+  useEffect(() => {
+    const handleAuthCleanup = () => {
+      setHasAcceptedPolicy(null);
+      setPolicyStatus(null);
+      setHasDeclined(false);
+      setIsCheckingPolicy(false);
+    };
+
+    window.addEventListener('auth:logout', handleAuthCleanup);
+    window.addEventListener('auth:cleared', handleAuthCleanup);
+    return () => {
+      window.removeEventListener('auth:logout', handleAuthCleanup);
+      window.removeEventListener('auth:cleared', handleAuthCleanup);
+    };
+  }, []);
+
   const acceptPolicy = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await policyService.acceptActivePolicy(ACTIVE_POLICY.version);
@@ -65,9 +82,9 @@ export const PolicyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await checkPolicyStatus();
         return { success: true };
       }
-      return { success: false, error: res.message || 'Failed to record policy acceptance.' };
+      return { success: false, error: res.message || "We couldn't save your policy acceptance. Please try again." };
     } catch (err: any) {
-      const errMsg = err?.message || 'Failed to record policy acceptance.';
+      const errMsg = formatErrorMessage(err);
       return { success: false, error: errMsg };
     }
   }, [checkPolicyStatus]);

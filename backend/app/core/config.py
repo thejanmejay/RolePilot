@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Optional
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,8 +37,58 @@ class Settings(BaseSettings):
     MAX_RESUME_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB
     RESUME_STORAGE_BUCKET: str = "resumes"
 
-    # CORS settings
-    CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
+    # CORS settings - production Vercel and local development origins
+    CORS_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            "https://rolepilot-frontend-phi.vercel.app",
+            "https://rolepilot-frontend.vercel.app",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:5173",
+        ]
+    )
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: object) -> list[str]:
+        default_origins: list[str] = [
+            "https://rolepilot-frontend-phi.vercel.app",
+            "https://rolepilot-frontend.vercel.app",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:5173",
+        ]
+
+        parsed: list[str] = []
+        if isinstance(v, str):
+            v_str = v.strip()
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    parsed = json.loads(v_str)
+                except Exception:
+                    parsed = [item.strip().strip("'\"") for item in v_str[1:-1].split(",") if item.strip()]
+            else:
+                parsed = [item.strip() for item in v_str.split(",") if item.strip()]
+        elif isinstance(v, (list, tuple, set)):
+            parsed = [str(item).strip() for item in v if item]
+
+        all_origins = list(default_origins)
+        for item in parsed:
+            cleaned = item.rstrip("/")
+            if cleaned and cleaned != "*" and cleaned not in all_origins:
+                all_origins.append(cleaned)
+
+        frontend_env = os.getenv("FRONTEND_ORIGIN", "").strip().rstrip("/")
+        if frontend_env and frontend_env != "*" and frontend_env not in all_origins:
+            all_origins.append(frontend_env)
+
+        return all_origins
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,0 +1,25 @@
+User-agent: *
+Allow: /
+Allow: /blog
+Allow: /blog/*
+Allow: /about
+Allow: /terms
+Allow: /privacy
+Allow: /guidelines
+Allow: /support
+Allow: /features
+Allow: /integrations
+Allow: /pricing
+Allow: /careers
+Allow: /accessibility
+Allow: /security
+Allow: /contact
+Allow: /guides
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /jobs
+Disallow: /applications
+Disallow: /automation
+
+Sitemap: https://rolepilot-frontend-phi.vercel.app/sitemap.xml

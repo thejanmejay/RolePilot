@@ -10,12 +10,16 @@ interface VerifyEmailPageProps {
   onNavigateHome: () => void;
   onNavigateDashboard?: () => void;
   onSuccess?: () => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const VerifyEmailPage: React.FC<VerifyEmailPageProps> = ({
   initialEmail = '',
   onNavigateLogin,
   onNavigateHome,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   // Extract email from prop or query param
   const [email, setEmail] = useState(() => {
@@ -88,6 +92,8 @@ export const VerifyEmailPage: React.FC<VerifyEmailPageProps> = ({
       footerActionText="Back to login"
       onFooterAction={onNavigateLogin}
       onNavigateHome={onNavigateHome}
+      onNavigateTerms={onNavigateTerms}
+      onNavigatePrivacy={onNavigatePrivacy}
     >
       <div className="otp-container" style={{ padding: '8px 0', textAlign: 'center' }}>
         <div
@@ -151,12 +157,12 @@ export const VerifyEmailPage: React.FC<VerifyEmailPageProps> = ({
         )}
 
         {/* Core Message & Supporting Guidance */}
-        <div style={{ margin: '14px 0 18px', textAlign: 'center', maxWidth: '380px' }}>
-          <p style={{ fontSize: '0.95rem', color: '#101A3A', lineHeight: 1.6, margin: '0 0 10px', fontWeight: 500 }}>
-            Open the email and click the verification link to confirm your account.
+        <div style={{ margin: '14px 0 18px', textAlign: 'center', maxWidth: '420px' }}>
+          <p style={{ fontSize: '0.95rem', color: '#101A3A', lineHeight: 1.6, margin: '0 0 10px', fontWeight: 600 }}>
+            Please check your email and confirm your identity. If your account does not exist, you will receive the verification email. If your account already exists, please click on Log in.
           </p>
           <p style={{ fontSize: '0.85rem', color: '#64748B', lineHeight: 1.5, margin: 0 }}>
-            If you don't see the email, check your spam or junk folder.
+            Open the email and click the verification link to confirm your account. If you don't see it, check your spam or junk folder.
           </p>
         </div>
 

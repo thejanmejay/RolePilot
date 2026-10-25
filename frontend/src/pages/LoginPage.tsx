@@ -3,7 +3,8 @@ import { LogIn, AlertCircle, CheckCircle, Loader2, Key, Terminal, ChevronDown, C
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
-import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
+// Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase
+// import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,6 +15,8 @@ interface LoginPageProps {
   onSuccess?: () => void;
   onNavigateForgotPassword: () => void;
   onNavigateVerifyEmail: (email: string) => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
@@ -23,6 +26,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onSuccess,
   onNavigateForgotPassword,
   onNavigateVerifyEmail,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   const { login } = useAuth();
 
@@ -172,16 +177,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       footerActionText="Sign up"
       onFooterAction={onNavigateSignup}
       onNavigateHome={onNavigateHome}
+      onNavigateTerms={onNavigateTerms}
+      onNavigatePrivacy={onNavigatePrivacy}
     >
-      <GoogleAuthButton
-        label="Continue with Google"
-        onError={(err) => setGeneralError(err)}
-        disabled={isSubmitting}
-      />
-
-      <div className="auth-divider">
-        <span>or sign in with email</span>
-      </div>
+      {/* Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase */}
 
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
         {generalError && (
@@ -286,6 +285,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </>
           )}
         </button>
+
+        <div className="signup-legal-note" style={{ marginTop: '16px' }}>
+          By signing in, you agree to RolePilot's{' '}
+          <a
+            href="/terms"
+            onClick={(e) => {
+              if (!e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                onNavigateTerms?.();
+              }
+            }}
+          >
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              if (!e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                onNavigatePrivacy?.();
+              }
+            }}
+          >
+            Privacy Policy
+          </a>
+          .
+        </div>
       </form>
 
       {/* Developer / Local Test Token Accordion */}

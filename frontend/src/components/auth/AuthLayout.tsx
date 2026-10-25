@@ -11,6 +11,8 @@ interface AuthLayoutProps {
   footerActionText: string;
   onFooterAction: () => void;
   onNavigateHome: () => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const AuthLayout: React.FC<AuthLayoutProps> = ({
@@ -21,6 +23,8 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   footerActionText,
   onFooterAction,
   onNavigateHome,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   return (
     <div className="auth-page-wrapper">
@@ -81,11 +85,29 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
           <span>User-controlled automation — no blind or guaranteed submissions</span>
         </div>
         <div className="auth-footer-links">
-          <button type="button" onClick={onNavigateHome}>Privacy Policy</button>
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              if (!e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                onNavigatePrivacy ? onNavigatePrivacy() : onNavigateHome();
+              }
+            }}
+          >
+            Privacy Policy
+          </a>
           <span>•</span>
-          <button type="button" onClick={onNavigateHome}>Terms of Service</button>
-          <span>•</span>
-          <button type="button" onClick={onNavigateHome}>Status</button>
+          <a
+            href="/terms"
+            onClick={(e) => {
+              if (!e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                onNavigateTerms ? onNavigateTerms() : onNavigateHome();
+              }
+            }}
+          >
+            Terms of Service
+          </a>
         </div>
         <div>
           © {new Date().getFullYear()} RolePilot. All rights reserved.

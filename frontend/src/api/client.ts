@@ -12,6 +12,20 @@ export class ApiError extends Error {
 
 export function formatErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.status === 0) {
+      return 'Unable to connect to RolePilot. Check your connection and try again.';
+    }
+    if (err.status === 401) {
+      return 'Your session has expired. Please sign in again.';
+    }
+    if (err.status === 403) {
+      return typeof err.data?.detail === 'string'
+        ? err.data.detail
+        : 'You do not have permission to perform this action.';
+    }
+    if (err.status >= 500) {
+      return "We couldn't save your policy acceptance. Please try again.";
+    }
     if (typeof err.data?.detail === 'string') {
       return err.data.detail;
     }
@@ -20,7 +34,16 @@ export function formatErrorMessage(err: unknown): string {
     }
     return err.message;
   }
-  if (err instanceof Error) return err.message;
+  if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
+    return 'Unable to connect to RolePilot. Check your connection and try again.';
+  }
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    if (msg.includes('failed to fetch') || msg.includes('network') || msg.includes('load failed')) {
+      return 'Unable to connect to RolePilot. Check your connection and try again.';
+    }
+    return err.message;
+  }
   return 'An unexpected error occurred. Please try again.';
 }
 
@@ -40,10 +63,19 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (netErr: any) {
+    throw new ApiError(
+      0,
+      'Unable to connect to RolePilot. Check your connection and try again.',
+      netErr
+    );
+  }
 
   if (response.status === 204) {
     return {} as T;
@@ -63,6 +95,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 
     let errorMessage = `HTTP Error ${response.status}`;
+    if (response.status === 401) {
+      errorMessage = 'Your session has expired. Please sign in again.';
+    } else if (response.status === 403) {
+      errorMessage = 'You do not have permission to perform this action.';
+    } else if (response.status >= 500) {
+      errorMessage = "We couldn't save your policy acceptance. Please try again.";
+    }
+
     if (data && typeof data === 'object') {
       if (typeof data.detail === 'string') {
         errorMessage = data.detail;

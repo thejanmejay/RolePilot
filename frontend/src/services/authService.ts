@@ -492,16 +492,85 @@ export const authService = {
   },
 
   /**
-   * Sign out of current Supabase session and clear client state.
+   * Clear all RolePilot-owned client-side storage, tokens, and session traces safely.
+   */
+  clearLocalClientData(): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem('supabase_access_token');
+
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (
+            key &&
+            (key === 'supabase_access_token' ||
+              key.startsWith('sb-') ||
+              key.startsWith('rolepilot_'))
+          ) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((key) => {
+          try {
+            window.localStorage.removeItem(key);
+          } catch {
+            // Safe fallback
+          }
+        });
+      }
+
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const sessionKeysToRemove: string[] = [];
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const key = window.sessionStorage.key(i);
+          if (
+            key &&
+            (key.startsWith('rolepilot_') ||
+              key.startsWith('sb-') ||
+              key.includes('token') ||
+              key.includes('auth'))
+          ) {
+            sessionKeysToRemove.push(key);
+          }
+        }
+        sessionKeysToRemove.forEach((key) => {
+          try {
+            window.sessionStorage.removeItem(key);
+          } catch {
+            // Safe fallback
+          }
+        });
+      }
+    } catch {
+      // Gracefully handle sandboxed or restricted storage environments
+    }
+
+    // Clear RolePilot CacheStorage if supported
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      try {
+        window.caches.keys().then((keys) => {
+          keys
+            .filter((k) => k.toLowerCase().includes('rolepilot'))
+            .forEach((k) => window.caches.delete(k));
+        }).catch(() => null);
+      } catch {
+        // Safe fallback
+      }
+    }
+  },
+
+  /**
+   * Sign out of current Supabase session and thoroughly clear all local client data.
    */
   async signOut(): Promise<void> {
     if (supabase) {
       try {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => null);
       } catch {
         console.warn('Supabase signout failed; local session data was cleared.');
       }
     }
-    localStorage.removeItem('supabase_access_token');
+    this.clearLocalClientData();
   },
 };

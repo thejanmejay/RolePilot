@@ -5,3 +5,4 @@ export { ErrorState } from './ErrorState';
 export { CompanyAvatar } from './CompanyAvatar';
 export { Skeleton, ListCardSkeleton, DetailPaneSkeleton } from './Skeleton';
 export { Modal } from '../Modal';
+export { PublicFooter } from './PublicFooter';

@@ -94,6 +94,24 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [isAuthenticated, hasAcceptedPolicy, refreshProfile]);
 
+  useEffect(() => {
+    const handleAuthCleanup = () => {
+      setProfile(null);
+      setResumes([]);
+      setSearchConfigs([]);
+      setError(null);
+      setIsLoading(false);
+      setIsRefreshing(false);
+    };
+
+    window.addEventListener('auth:logout', handleAuthCleanup);
+    window.addEventListener('auth:cleared', handleAuthCleanup);
+    return () => {
+      window.removeEventListener('auth:logout', handleAuthCleanup);
+      window.removeEventListener('auth:cleared', handleAuthCleanup);
+    };
+  }, []);
+
   const updateProfileState = useCallback((updated: Partial<Profile> | Profile) => {
     setProfile((prev) => (prev ? { ...prev, ...updated } : (updated as Profile)));
   }, []);
