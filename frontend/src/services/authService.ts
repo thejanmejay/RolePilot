@@ -12,7 +12,7 @@
 import { createClient, SupabaseClient, type Session, type User } from '@supabase/supabase-js';
 import { apiClient } from '../api/client';
 
-// Read Vite environment variables
+// Read Vite environment variables with public defaults for production preview resilience
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || 'https://jgswscubkoevjmyorrha.supabase.co').trim();
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impnc3dzY3Via29ldmpteW9ycmhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MjIyMjYsImV4cCI6MjEwNjA5ODIyNn0.r7DNagli-Nfd5bgvSTqbKGM1QVSeYvELNpcd0DToJKE').trim();
 
@@ -27,8 +27,8 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
         detectSessionInUrl: true,
       },
     });
-  } catch (err) {
-    console.error('Failed to initialize Supabase client:', err);
+  } catch {
+    console.error('Failed to initialize Supabase client. Check the public Supabase URL and anon key configuration.');
   }
 }
 
@@ -323,8 +323,8 @@ export const authService = {
                 emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
               },
             });
-          } catch (resendErr) {
-            console.warn('Auto resend verification email attempt on unconfirmed sign in:', resendErr);
+          } catch {
+            console.warn('Automatic verification email resend failed.');
           }
 
           return {
@@ -335,9 +335,13 @@ export const authService = {
           };
         }
 
+        const normalizedMessage = error.message.toLowerCase();
+        const userMessage = normalizedMessage.includes('invalid login credentials')
+          ? 'Email or password is incorrect. If you have not created an account, sign up first. If you forgot your password, use the password reset link.'
+          : error.message;
         return {
           success: false,
-          error: error.message,
+          error: userMessage,
         };
       }
 
@@ -407,18 +411,18 @@ export const authService = {
       if (error) {
         return {
           success: false,
-          error: error.message,
+          error: 'We could not send a password reset email. Please try again later.',
         };
       }
 
       return {
         success: true,
-        message: `Password recovery link sent to ${email}. Please check your inbox.`,
+        message: `If an account exists for ${email.trim()}, a password recovery link will be sent. Please check your inbox.`,
       };
-    } catch (err: any) {
+    } catch {
       return {
         success: false,
-        error: err.message || 'Failed to submit password recovery request.',
+        error: 'We could not send a password reset email. Please try again later.',
       };
     }
   },
@@ -435,6 +439,14 @@ export const authService = {
     }
 
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        return {
+          success: false,
+          error: 'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.',
+        };
+      }
+
       const { error } = await supabase.auth.updateUser({
         password: newPassword,
       });
@@ -442,18 +454,18 @@ export const authService = {
       if (error) {
         return {
           success: false,
-          error: error.message,
+          error: 'The password could not be updated. Your reset link may have expired; request a new one and try again.',
         };
       }
 
       return {
         success: true,
-        message: 'Password updated successfully! You can now log in with your new password.',
+        message: 'Password updated successfully! Redirecting to your account...',
       };
-    } catch (err: any) {
+    } catch {
       return {
         success: false,
-        error: err.message || 'Failed to update password.',
+        error: 'The password could not be updated. Your reset link may have expired; request a new one and try again.',
       };
     }
   },
@@ -485,8 +497,8 @@ export const authService = {
     if (supabase) {
       try {
         await supabase.auth.signOut();
-      } catch (err) {
-        console.warn('Error during Supabase signout:', err);
+      } catch {
+        console.warn('Supabase signout failed; local session data was cleared.');
       }
     }
     localStorage.removeItem('supabase_access_token');

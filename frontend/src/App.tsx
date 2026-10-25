@@ -66,10 +66,17 @@ function AppContent() {
   }, []);
 
   const routeUserAfterAuth = useCallback(() => {
-    // Leave callback/login screens; the render gates below wait for the
+    // Leave callback/login/reset screens; the render gates below wait for the
     // restored session, policy result, and profile before choosing a destination.
-    navigate('/');
-  }, [navigate]);
+    if (postAuthRoute === 'dashboard') {
+      setCurrentTab('dashboard');
+      navigate('/dashboard');
+    } else if (postAuthRoute === 'onboarding') {
+      navigate('/onboarding');
+    } else {
+      navigate('/');
+    }
+  }, [navigate, postAuthRoute]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -180,8 +187,10 @@ function AppContent() {
   if (currentPath === '/reset-password') {
     return (
       <ResetPasswordPage
+        onSuccess={routeUserAfterAuth}
         onNavigateLogin={() => navigate('/login')}
         onNavigateHome={() => navigate('/')}
+        onNavigateForgotPassword={() => navigate('/forgot-password')}
       />
     );
   }

@@ -46,8 +46,8 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
       } else {
         setError(res.error || 'Failed to send password recovery link. Please try again.');
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during password recovery.');
+    } catch {
+      setError('We could not send a password reset email. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }

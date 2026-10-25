@@ -1,30 +1,126 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Lock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { PasswordField } from '../components/auth/PasswordField';
-import { authService } from '../services/authService';
+import { authService, supabase } from '../services/authService';
+import { useAuth } from '../context/AuthContext';
+import {
+  getPasswordRecoveryLinkError,
+  parseRecoveryLinkParams,
+  type PasswordRecoveryState,
+} from '../services/passwordRecoveryFlow';
 
 interface ResetPasswordPageProps {
+  onSuccess: () => void;
   onNavigateLogin: () => void;
   onNavigateHome: () => void;
+  onNavigateForgotPassword: () => void;
 }
 
 export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
+  onSuccess,
   onNavigateLogin,
   onNavigateHome,
+  onNavigateForgotPassword,
 }) => {
+  const { isLoading: isAuthLoading, isPasswordRecovery, session, clearPasswordRecovery } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
+  const [isVerifiedReady, setIsVerifiedReady] = useState(false);
+  const [isTimeout, setIsTimeout] = useState(false);
+
+  const recoveryLinkError = useMemo(() => getPasswordRecoveryLinkError(window.location.href), []);
+  const linkParams = useMemo(() => parseRecoveryLinkParams(window.location.href), []);
+
+  useEffect(() => {
+    // If already updated or already verified, nothing to wait for
+    if (passwordUpdated || isVerifiedReady) return;
+
+    // Direct check: AuthContext already established the recovery session
+    if (isPasswordRecovery && session) {
+      setIsVerifiedReady(true);
+      if (window.location.search || window.location.hash) {
+        window.history.replaceState(null, '', '/reset-password');
+      }
+      return;
+    }
+
+    // If link has an explicit error, stop immediately
+    if (recoveryLinkError) {
+      return;
+    }
+
+    // If there is NO recovery indicator in URL and auth loading is done without recovery event
+    if (!isAuthLoading && !linkParams.hasRecoveryIndicator && !isPasswordRecovery) {
+      setIsTimeout(true);
+      return;
+    }
+
+    // Otherwise, listen for Supabase auth state callback processing
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsub: (() => void) | null = null;
+
+    if (supabase) {
+      const { data: listener } = supabase.auth.onAuthStateChange((event, s) => {
+        if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && isPasswordRecovery)) {
+          if (s) {
+            setIsVerifiedReady(true);
+            if (window.location.search || window.location.hash) {
+              window.history.replaceState(null, '', '/reset-password');
+            }
+          }
+        }
+      });
+      unsub = () => listener.subscription.unsubscribe();
+    }
+
+    // Allow sufficient time for hash parsing / PKCE code exchange
+    timer = setTimeout(() => {
+      setIsTimeout(true);
+    }, 4000);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (unsub) unsub();
+    };
+  }, [
+    passwordUpdated,
+    isVerifiedReady,
+    isPasswordRecovery,
+    session,
+    recoveryLinkError,
+    isAuthLoading,
+    linkParams.hasRecoveryIndicator,
+  ]);
+
+  const recoveryState: PasswordRecoveryState = useMemo(() => {
+    if (passwordUpdated) return 'updated';
+    if (recoveryLinkError) return 'invalid';
+    if (isVerifiedReady || (isPasswordRecovery && Boolean(session))) return 'ready';
+    if (isTimeout) return 'invalid';
+    return 'checking';
+  }, [passwordUpdated, recoveryLinkError, isVerifiedReady, isPasswordRecovery, session, isTimeout]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
+    if (!password && !confirmPassword) {
+      setError('Please enter and confirm your new password.');
+      return;
+    }
+
     if (!password) {
       setError('Please enter a new password.');
+      return;
+    }
+
+    if (!confirmPassword) {
+      setError('Please confirm your new password.');
       return;
     }
 
@@ -43,15 +139,18 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
     try {
       const res = await authService.updatePassword(password);
       if (res.success) {
-        setSuccessMessage(res.message || 'Password updated successfully! Redirecting to login...');
-        setTimeout(() => {
-          onNavigateLogin();
+        setSuccessMessage(res.message || 'Password updated successfully! Redirecting to your account...');
+        setPasswordUpdated(true);
+        clearPasswordRecovery();
+        // Allow user to see the success confirmation, then route based on authoritative state
+        window.setTimeout(() => {
+          onSuccess();
         }, 1200);
       } else {
         setError(res.error || 'Failed to update password. Your reset link may have expired.');
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while updating your password.');
+    } catch {
+      setError('The password could not be updated. Your reset link may have expired; request a new one and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -59,76 +158,104 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
 
   return (
     <AuthLayout
-      title="Create new password"
+      title="Reset your password"
       subtitle="Choose a strong, secure password for your RolePilot account"
       footerText="Remembered your password?"
       footerActionText="Log in"
       onFooterAction={onNavigateLogin}
       onNavigateHome={onNavigateHome}
     >
-      <form onSubmit={handleSubmit} className="auth-form" noValidate>
-        {error && (
+      {recoveryState === 'checking' ? (
+        <div role="status" className="auth-alert">
+          <Loader2 size={18} className="spin-animation" />
+          <span>Verifying your password reset link...</span>
+        </div>
+      ) : recoveryState === 'invalid' ? (
+        <div className="auth-form">
           <div role="alert" className="auth-alert auth-alert-error">
             <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>{error}</div>
+            <div>
+              {recoveryLinkError ||
+                'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.'}
+            </div>
           </div>
-        )}
-
-        {successMessage && (
-          <div role="status" className="auth-alert auth-alert-success">
-            <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>{successMessage}</div>
-          </div>
-        )}
-
-        <PasswordField
-          id="reset-password-input"
-          label="New Password"
-          required
-          autoComplete="new-password"
-          placeholder="At least 8 characters"
-          helperText="Minimum 8 characters"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            if (error) setError(null);
-          }}
-          disabled={isSubmitting}
-        />
-
-        <PasswordField
-          id="reset-confirm-password-input"
-          label="Confirm New Password"
-          required
-          autoComplete="new-password"
-          placeholder="Re-enter password"
-          value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
-            if (error) setError(null);
-          }}
-          disabled={isSubmitting}
-        />
-
-        <button
-          type="submit"
-          className="auth-btn-primary"
-          disabled={isSubmitting}
-          id="update-password-submit-btn"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 size={18} className="spin-animation" />
-              <span>Updating password...</span>
-            </>
-          ) : (
-            <>
-              <Lock size={16} />
-              <span>Update Password</span>
-            </>
+          <button type="button" className="auth-btn-primary" onClick={onNavigateForgotPassword}>
+            Request another reset email
+          </button>
+          <button type="button" className="auth-btn-secondary" onClick={onNavigateLogin}>
+            Return to login
+          </button>
+        </div>
+      ) : recoveryState === 'updated' ? (
+        <div role="status" className="auth-alert auth-alert-success">
+          <CheckCircle size={18} style={{ flexShrink: 0 }} />
+          <div>{successMessage}</div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="auth-form" noValidate>
+          {error && (
+            <div role="alert" className="auth-alert auth-alert-error">
+              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>{error}</div>
+            </div>
           )}
-        </button>
-      </form>
+
+          {successMessage && (
+            <div role="status" className="auth-alert auth-alert-success">
+              <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>{successMessage}</div>
+            </div>
+          )}
+
+          <PasswordField
+            id="reset-password-input"
+            label="New password"
+            required
+            autoComplete="new-password"
+            placeholder="At least 8 characters"
+            helperText="Minimum 8 characters"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError(null);
+            }}
+            disabled={isSubmitting}
+          />
+
+          <PasswordField
+            id="reset-confirm-password-input"
+            label="Confirm new password"
+            required
+            autoComplete="new-password"
+            placeholder="Re-enter password"
+            value={confirmPassword}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (error) setError(null);
+            }}
+            disabled={isSubmitting}
+          />
+
+          <button
+            type="submit"
+            className="auth-btn-primary"
+            disabled={isSubmitting}
+            id="update-password-submit-btn"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={18} className="spin-animation" />
+                <span>Saving new password...</span>
+              </>
+            ) : (
+              <>
+                <Lock size={16} />
+                <span>Save new password</span>
+              </>
+            )}
+          </button>
+        </form>
+      )}
     </AuthLayout>
   );
 };
