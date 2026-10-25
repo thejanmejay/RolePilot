@@ -19,6 +19,8 @@ export interface RolePilotLogoProps {
   style?: React.CSSProperties;
   alt?: string;
   transparent?: boolean;
+  colorMode?: 'light' | 'dark';
+  whiteText?: boolean;
 }
 
 export const RolePilotLogo: React.FC<RolePilotLogoProps> = ({
@@ -30,8 +32,11 @@ export const RolePilotLogo: React.FC<RolePilotLogoProps> = ({
   style = {},
   alt = 'RolePilot — Your Career. Your Next Move.',
   transparent = false,
+  colorMode = 'light',
+  whiteText = false,
 }) => {
-  // Determine asset source based on variant & transparency preference
+  // Determine asset source based on variant, transparency & dark background preference
+  const isDark = colorMode === 'dark' || whiteText;
   let src = '/rolepilot-compact.png';
   if (variant === 'full') {
     src = transparent ? '/rolepilot-logo-transparent.png' : '/rolepilot-logo.png';
@@ -39,7 +44,11 @@ export const RolePilotLogo: React.FC<RolePilotLogoProps> = ({
     src = transparent ? '/rolepilot-icon-transparent.png' : '/rolepilot-icon.png';
   } else {
     // compact
-    src = transparent ? '/rolepilot-compact-transparent.png' : '/rolepilot-compact.png';
+    if (isDark) {
+      src = '/rolepilot-compact-white.png';
+    } else {
+      src = transparent ? '/rolepilot-compact-transparent.png' : '/rolepilot-compact.png';
+    }
   }
 
   // Dimension presets

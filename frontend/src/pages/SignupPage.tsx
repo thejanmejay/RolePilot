@@ -188,7 +188,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({
       {/* Left Panel: Brand & Benefits */}
       <aside className="signup-split-left" aria-label="RolePilot Overview">
         <div className="signup-brand-header">
-          <RolePilotLogo variant="compact" height={36} transparent />
+          <RolePilotLogo variant="compact" height={36} colorMode="dark" transparent />
           <span className="signup-tagline-badge">
             <Sparkles size={13} color="#FFAD18" />
             <span>Your Career. Your Next Move.</span>
