@@ -21,7 +21,7 @@ from backend.app.workers.linkedin_worker import execute_automation_run
 @pytest.mark.asyncio
 async def test_session_health_no_cookies(monkeypatch):
     """Test session health check when no cookie file exists."""
-    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda: False)
+    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda cookies=None: False)
     mock_page = AsyncMock()
     health = await check_session_health(mock_page)
     assert health["authenticated"] is False
@@ -32,7 +32,7 @@ async def test_session_health_no_cookies(monkeypatch):
 @pytest.mark.asyncio
 async def test_session_health_login_redirect(monkeypatch):
     """Test session health check when redirected to login."""
-    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda: True)
+    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda cookies=None: True)
     mock_page = AsyncMock()
     mock_page.url = "https://www.linkedin.com/login?fromSignIn=true"
     mock_page.title = AsyncMock(return_value="Sign In | LinkedIn")
@@ -47,7 +47,7 @@ async def test_session_health_login_redirect(monkeypatch):
 @pytest.mark.asyncio
 async def test_session_health_checkpoint_detected(monkeypatch):
     """Test session health check when security checkpoint is encountered."""
-    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda: True)
+    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda cookies=None: True)
     mock_page = AsyncMock()
     mock_page.url = "https://www.linkedin.com/checkpoint/challenge/123"
     mock_page.title = AsyncMock(return_value="Security Verification | LinkedIn")
@@ -61,7 +61,7 @@ async def test_session_health_checkpoint_detected(monkeypatch):
 @pytest.mark.asyncio
 async def test_session_health_authenticated(monkeypatch):
     """Test session health check for a valid authenticated session."""
-    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda: True)
+    monkeypatch.setattr("linkedin_hunter.auth.session.has_valid_session", lambda cookies=None: True)
     mock_page = AsyncMock()
     mock_page.url = "https://www.linkedin.com/feed/"
     mock_page.title = AsyncMock(return_value="Feed | LinkedIn")
@@ -110,6 +110,7 @@ async def test_dry_run_guard_never_submits():
     mock_easy_apply_btn.text_content.return_value = "Easy Apply"
 
     mock_modal = AsyncMock()
+    mock_modal.text_content.return_value = ""
     mock_footer_btn = AsyncMock()
     mock_footer_btn.get_attribute.return_value = "Submit application"
     mock_footer_btn.text_content.return_value = "Submit application"
@@ -243,6 +244,7 @@ async def test_live_mode_blocked_without_confirmation_token():
     mock_easy_apply_btn.text_content.return_value = "Easy Apply"
 
     mock_modal = AsyncMock()
+    mock_modal.text_content.return_value = ""
     mock_footer_btn = AsyncMock()
     mock_footer_btn.get_attribute.return_value = "Submit application"
     mock_footer_btn.text_content.return_value = "Submit application"
@@ -329,6 +331,7 @@ async def test_resume_upload_and_field_filling_telemetry(tmp_path):
     mock_easy_apply_btn.text_content.return_value = "Easy Apply"
 
     mock_modal = AsyncMock()
+    mock_modal.text_content.return_value = ""
     mock_footer_btn = AsyncMock()
     mock_footer_btn.get_attribute.return_value = "Submit application"
     mock_footer_btn.text_content.return_value = "Submit application"
@@ -426,13 +429,44 @@ async def test_invalid_session_fails_run_immediately():
     mock_profile.authorized_to_work = True
     mock_profile.willing_to_relocate = True
 
-    mock_db.execute.return_value.scalar_one_or_none.side_effect = [mock_run, mock_profile]
-    mock_db.execute.return_value.scalars.return_value.first.return_value = None
+    mock_consent = MagicMock()
+    mock_consent.user_id = mock_run.user_id
+    mock_consent.policy_type = "linkedin_automation"
+
+    def mock_execute(stmt, *args, **kwargs):
+        res = MagicMock()
+        stmt_str = str(stmt)
+        if "automation_runs" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_run
+            res.scalars.return_value.first.return_value = mock_run
+        elif "profiles" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_profile
+            res.scalars.return_value.first.return_value = mock_profile
+        elif "user_policy_acceptance" in stmt_str:
+            res.scalars.return_value.first.return_value = mock_consent
+            res.scalar_one_or_none.return_value = mock_consent
+        elif "linkedin_accounts" in stmt_str:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+        elif "resumes" in stmt_str:
+            res.scalars.return_value.first.return_value = None
+            res.scalar_one_or_none.return_value = None
+        elif "jobs" in stmt_str:
+            res.scalars.return_value.all.return_value = []
+            res.scalars.return_value.first.return_value = None
+        else:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+            res.scalars.return_value.all.return_value = []
+        return res
+
+    mock_db.execute.side_effect = mock_execute
 
     with patch("backend.app.workers.linkedin_worker.SessionLocal", return_value=mock_db):
-        with patch("linkedin_hunter.auth.session.has_valid_session", return_value=False):
-            with patch("backend.app.services.automation_service.AutomationService.log_event") as mock_log:
-                await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
+        with patch("linkedin_hunter.auth.session.load_cookies", return_value=None):
+            with patch("linkedin_hunter.auth.session.has_valid_session", return_value=False):
+                with patch("backend.app.services.automation_service.AutomationService.log_event") as mock_log:
+                    await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
 
                 # Status must be failed
                 assert mock_run.status == "failed"
@@ -510,10 +544,39 @@ async def test_dry_run_application_state_semantics():
     mock_job.job_url = "https://www.linkedin.com/jobs/view/4462936722/"
     mock_job.description = "QA Automation Engineer role"
 
-    # DB queries: 1. run, 2. profile, 3. resume, 4. jobs, 5. reload run
-    mock_db.execute.return_value.scalar_one_or_none.side_effect = [mock_run, mock_profile]
-    mock_db.execute.return_value.scalars.return_value.first.return_value = None
-    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_job]
+    mock_run.worker_id = "default"
+    mock_consent = MagicMock()
+    mock_consent.user_id = mock_run.user_id
+    mock_consent.policy_type = "linkedin_automation"
+
+    def mock_execute(stmt, *args, **kwargs):
+        res = MagicMock()
+        stmt_str = str(stmt)
+        if "automation_runs" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_run
+            res.scalars.return_value.first.return_value = mock_run
+        elif "profiles" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_profile
+            res.scalars.return_value.first.return_value = mock_profile
+        elif "user_policy_acceptance" in stmt_str:
+            res.scalars.return_value.first.return_value = mock_consent
+            res.scalar_one_or_none.return_value = mock_consent
+        elif "linkedin_accounts" in stmt_str:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+        elif "resumes" in stmt_str:
+            res.scalars.return_value.first.return_value = None
+            res.scalar_one_or_none.return_value = None
+        elif "jobs" in stmt_str:
+            res.scalars.return_value.all.return_value = [mock_job]
+            res.scalars.return_value.first.return_value = mock_job
+        else:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+            res.scalars.return_value.all.return_value = []
+        return res
+
+    mock_db.execute.side_effect = mock_execute
 
     playwright_return = {
         "success": True,
@@ -769,9 +832,39 @@ async def test_ambiguous_submission_does_not_increment_counter_or_retry():
     mock_job.job_url = "https://www.linkedin.com/jobs/view/4462936722/"
     mock_job.description = "QA role"
 
-    mock_db.execute.return_value.scalar_one_or_none.side_effect = [mock_run, mock_profile]
-    mock_db.execute.return_value.scalars.return_value.first.return_value = None
-    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_job]
+    mock_run.worker_id = "default"
+    mock_consent = MagicMock()
+    mock_consent.user_id = mock_run.user_id
+    mock_consent.policy_type = "linkedin_automation"
+
+    def mock_execute(stmt, *args, **kwargs):
+        res = MagicMock()
+        stmt_str = str(stmt)
+        if "automation_runs" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_run
+            res.scalars.return_value.first.return_value = mock_run
+        elif "profiles" in stmt_str:
+            res.scalar_one_or_none.return_value = mock_profile
+            res.scalars.return_value.first.return_value = mock_profile
+        elif "user_policy_acceptance" in stmt_str:
+            res.scalars.return_value.first.return_value = mock_consent
+            res.scalar_one_or_none.return_value = mock_consent
+        elif "linkedin_accounts" in stmt_str:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+        elif "resumes" in stmt_str:
+            res.scalars.return_value.first.return_value = None
+            res.scalar_one_or_none.return_value = None
+        elif "jobs" in stmt_str:
+            res.scalars.return_value.all.return_value = [mock_job]
+            res.scalars.return_value.first.return_value = mock_job
+        else:
+            res.scalar_one_or_none.return_value = None
+            res.scalars.return_value.first.return_value = None
+            res.scalars.return_value.all.return_value = []
+        return res
+
+    mock_db.execute.side_effect = mock_execute
 
     ambiguous_return = {
         "success": False,

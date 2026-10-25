@@ -50,7 +50,12 @@ APPLY_SELECTORS = {
 MAX_FORM_STEPS = 10  # Safety limit on modal steps
 
 
-async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False) -> None:
+async def run_apply(
+    config: HunterConfig,
+    limit: int = 15,
+    dry_run: bool = False,
+    cookies: Optional[list[dict]] = None,
+) -> None:
     """Main apply flow: search for Easy Apply jobs and apply to them.
 
     Uses the two-pane search results view: click job cards in left list,
@@ -60,12 +65,12 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
     reset_shutdown()
     install_signal_handlers()
 
-    if not has_valid_session():
-        console.print("[bold red]No valid session. Run 'linkedin-hunter login' first.[/bold red]")
+    active_cookies = cookies if cookies is not None else load_cookies()
+    if not has_valid_session(active_cookies):
+        console.print("[bold red]No valid session. Connect LinkedIn in RolePilot or run 'linkedin-hunter login' first.[/bold red]")
         return
 
-    cookies = load_cookies()
-    if not cookies:
+    if not active_cookies:
         return
 
     root = get_project_root()
@@ -89,7 +94,7 @@ async def run_apply(config: HunterConfig, limit: int = 15, dry_run: bool = False
 
     try:
         page = await engine.launch(headless=False)  # Always non-headless for apply
-        await engine.load_cookies(cookies)
+        await engine.load_cookies(active_cookies)
 
         console.print(f"\n{mode}[bold]Starting Apply session[/bold]")
         console.print(f"  Keywords: {config.search.keywords}")
@@ -860,7 +865,8 @@ async def _dismiss_modal(page, log_event_cb: Optional[Callable] = None) -> None:
         )
         if dialog_el:
             # Check if this dialog contains Save/Discard prompt
-            dialog_text = ((await dialog_el.text_content()) or "").lower()
+            raw_text = await dialog_el.text_content()
+            dialog_text = raw_text.lower() if isinstance(raw_text, str) else ""
             if "save" in dialog_text or "discard" in dialog_text or "return to this application" in dialog_text:
                 if log_event_cb:
                     log_event_cb("SAVE_EXIT_DIALOG_DETECTED", "Detected LinkedIn Save/Discard confirmation dialog. Clicking Discard.", "info")

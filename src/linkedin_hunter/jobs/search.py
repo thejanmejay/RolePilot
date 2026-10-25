@@ -252,14 +252,18 @@ async def collect_search_jobs(
     return unique_cards
 
 
-async def run_search(config: HunterConfig, limit: int | None = None) -> list[JobCard]:
+async def run_search(
+    config: HunterConfig,
+    limit: int | None = None,
+    cookies: Optional[list[dict]] = None,
+) -> list[JobCard]:
     """Execute a job search, save results to DB, and display them."""
-    if not has_valid_session():
-        console.print("[bold red]No valid session. Run 'linkedin-hunter login' first.[/bold red]")
+    active_cookies = cookies if cookies is not None else load_cookies()
+    if not has_valid_session(active_cookies):
+        console.print("[bold red]No valid session. Connect LinkedIn in RolePilot or run 'linkedin-hunter login' first.[/bold red]")
         return []
 
-    cookies = load_cookies()
-    if not cookies:
+    if not active_cookies:
         return []
 
     target_count = limit or config.search.max_jobs or 50
@@ -273,7 +277,7 @@ async def run_search(config: HunterConfig, limit: int | None = None) -> list[Job
 
     try:
         page = await engine.launch()
-        await engine.load_cookies(cookies)
+        await engine.load_cookies(active_cookies)
 
         all_cards = await collect_search_jobs(page, config, target_count=target_count)
 

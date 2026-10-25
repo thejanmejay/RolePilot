@@ -1865,6 +1865,42 @@ html {
   }
 }
 
+@media (max-width: 480px) {
+  .signup-split-left {
+    padding: 24px 16px 20px;
+  }
+  .signup-brand-header {
+    margin-bottom: 12px;
+  }
+  .signup-brand-headline {
+    font-size: 1.45rem;
+  }
+  .signup-benefits-list {
+    display: none;
+  }
+  .signup-brand-desc {
+    margin-bottom: 0;
+    font-size: 0.85rem;
+  }
+  .signup-split-right {
+    padding: 24px 16px 36px;
+  }
+  .signup-form-card {
+    max-width: 100%;
+  }
+  .signup-form-title {
+    font-size: 1.45rem;
+  }
+  .auth-btn-primary {
+    height: 48px;
+    font-size: 0.95rem;
+  }
+  .auth-input {
+    height: 44px;
+    font-size: 0.95rem;
+  }
+}
+
 /* ==========================================================================
    Mandatory Profile Onboarding Page
    ========================================================================== */

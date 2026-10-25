@@ -2,7 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import Any, Dict
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables verified / initialized.")
     except Exception as e:
         logger.warning("Could not auto-create tables on startup: %s", e)
+
+    # Verify production encryption keys fail startup if missing
+    if settings.ENVIRONMENT.lower() == "production":
+        from backend.app.services.linkedin_session_service import LinkedInSessionService
+        LinkedInSessionService._get_fernet()
+        logger.info("Production LinkedIn session encryption key verified.")
+
     yield
     logger.info("Shutting down LinkedIn Hunter SaaS Backend...")
 
@@ -80,6 +87,42 @@ def health_check_db() -> Dict[str, str]:
     except Exception as e:
         logger.warning("Database health check warning: %s", e)
         return {"status": "degraded", "database": "disconnected"}
+
+
+@app.get("/health/diagnostics", tags=["Health"])
+def health_diagnostics() -> Dict[str, Any]:
+    """Diagnostic check reporting database, encryption, and Playwright Chromium availability."""
+    from backend.app.services.browser_diagnostics import check_chromium_availability
+
+    # 1. Database check
+    db_status = "ok"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "disconnected"
+
+    # 2. Encryption key check
+    encryption_configured = bool(
+        getattr(settings, "SESSION_ENCRYPTION_KEY", None)
+        and len(settings.SESSION_ENCRYPTION_KEY.strip()) >= 32
+    )
+
+    # 3. Browser engine check
+    browser_diag = check_chromium_availability()
+
+    is_healthy = db_status == "ok" and (encryption_configured or settings.ENVIRONMENT != "production")
+    return {
+        "status": "healthy" if is_healthy else "degraded",
+        "service": "rolepilot-api",
+        "environment": settings.ENVIRONMENT,
+        "database": db_status,
+        "session_encryption": {
+            "configured": encryption_configured,
+            "required_in_production": True,
+        },
+        "browser_engine": browser_diag,
+    }
 
 
 # Mount API v1 router

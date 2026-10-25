@@ -58,28 +58,54 @@ def load_cookies() -> Optional[list[dict]]:
     return cookies
 
 
-def has_valid_session() -> bool:
-    """Check if we have a cookie file with LinkedIn session cookies."""
-    cookies = load_cookies()
-    if not cookies:
+def has_valid_session(cookies: Optional[list[dict]] = None) -> bool:
+    """Check if we have valid LinkedIn session cookies in memory or file."""
+    cookie_list = cookies if cookies is not None else load_cookies()
+    if not cookie_list:
         return False
 
-    # Check for essential LinkedIn session cookie
-    li_at = any(c.get("name") == "li_at" for c in cookies)
+    # Check for essential LinkedIn session cookie with non-empty value
+    li_at = any(
+        isinstance(c, dict)
+        and c.get("name") == "li_at"
+        and bool(str(c.get("value", "")).strip())
+        for c in cookie_list
+    )
     if not li_at:
-        log.warning("Cookie file exists but missing li_at session cookie")
+        log.warning("Session cookies present but missing non-empty li_at cookie")
         return False
 
     return True
 
 
-async def check_session_health(page) -> Dict[str, Any]:
+async def check_session_health(
+    page,
+    cookies: Optional[list[dict]] = None,
+) -> Dict[str, Any]:
     """Validate LinkedIn session state in the browser.
 
-    Returns:
-        Dict with keys: authenticated, session_available, login_redirect, checkpoint_detected, details
+    Multi-signal verification:
+    1. Active session availability: checks injected cookies or browser context cookies directly (not reliant on local disk).
+    2. URL validation: detects login/authwall redirects vs authenticated paths.
+    3. Title & DOM indicators: validates global nav and profile trigger presence vs login inputs and checkpoints/challenges.
     """
-    session_available = has_valid_session()
+    # 1. Inspect cookies in active browser context or explicit parameter
+    active_cookies = cookies
+    if active_cookies is None and hasattr(page, "context") and hasattr(page.context, "cookies"):
+        try:
+            res = page.context.cookies()
+            if hasattr(res, "__await__"):
+                active_cookies = await res
+            else:
+                active_cookies = res
+        except Exception as e:
+            log.warning("Could not read cookies from browser context: %s", e)
+
+    session_available = has_valid_session(active_cookies)
+    if not session_available:
+        # Fallback to local cookie file if not in context/param (for local dev/test workflows)
+        session_available = has_valid_session(None)
+
     if not session_available:
         return {
             "authenticated": False,

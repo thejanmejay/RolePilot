@@ -9,6 +9,8 @@ import { formatErrorMessage } from '../../api/client';
 import type { SearchConfig } from '../../types/job';
 import type { AutomationRun } from '../../types/automation';
 import type { Profile, Resume } from '../../types/profile';
+import { linkedinApi } from '../../api/linkedin';
+import { LinkedInConsentModal } from '../linkedin/LinkedInConsentModal';
 import { calculateApplicationReadiness, type ApplicationReadiness } from '../../utils/readiness';
 
 interface TriggerAutomationModalProps {
@@ -35,6 +37,9 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
   const [isLoadingConfigs, setIsLoadingConfigs] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // LinkedIn consent gate state
+  const [isLinkedInConsentOpen, setIsLinkedInConsentOpen] = useState<boolean>(false);
+
   // Application Readiness State
   const [readiness, setReadiness] = useState<ApplicationReadiness | null>(null);
 
@@ -44,6 +49,7 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
       setError(null);
       setAllowLiveSubmission(false);
       setLiveConfirmationToken('');
+      setIsLinkedInConsentOpen(false);
 
       Promise.all([
         jobsApi.getSearchConfigs().catch(() => [] as SearchConfig[]),
@@ -62,6 +68,29 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
         .finally(() => setIsLoadingConfigs(false));
     }
   }, [isOpen]);
+
+  const executeAutomationRun = async () => {
+    setIsSubmitting(true);
+    try {
+      const run = await automationApi.createRun({
+        search_config_id: selectedConfigId || undefined,
+        max_jobs: maxJobs,
+        dry_run: dryRun,
+        allow_live_submission: !dryRun && allowLiveSubmission,
+        live_submission_confirmation: !dryRun ? liveConfirmationToken.trim() : undefined,
+      });
+
+      showSuccess(dryRun ? 'RolePilot dry-run automation started in background!' : 'RolePilot LIVE automation started!');
+      onRunTriggered(run);
+      onClose();
+    } catch (err) {
+      const msg = formatErrorMessage(err);
+      setError(msg);
+      showError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,22 +113,19 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
     }
 
     try {
-      const run = await automationApi.createRun({
-        search_config_id: selectedConfigId || undefined,
-        max_jobs: maxJobs,
-        dry_run: dryRun,
-        allow_live_submission: !dryRun && allowLiveSubmission,
-        live_submission_confirmation: !dryRun ? liveConfirmationToken.trim() : undefined,
-      });
+      // Check LinkedIn session & consent lifecycle
+      const linkedinStatus = await linkedinApi.getStatus().catch(() => null);
+      if (!linkedinStatus?.is_connected || !linkedinStatus?.has_consent || linkedinStatus?.status === 'expired') {
+        setIsLinkedInConsentOpen(true);
+        setIsSubmitting(false);
+        return;
+      }
 
-      showSuccess(dryRun ? 'RolePilot dry-run automation started in background!' : 'RolePilot LIVE automation started!');
-      onRunTriggered(run);
-      onClose();
+      await executeAutomationRun();
     } catch (err) {
       const msg = formatErrorMessage(err);
       setError(msg);
       showError(msg);
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -112,7 +138,8 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Launch RolePilot Automation Run">
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} title="Launch RolePilot Automation Run">
       <form onSubmit={handleSubmit}>
         {/* Playwright Worker Intro */}
         <div
@@ -367,5 +394,18 @@ export const TriggerAutomationModal: React.FC<TriggerAutomationModalProps> = ({
         </div>
       </form>
     </Modal>
+
+    <LinkedInConsentModal
+      isOpen={isLinkedInConsentOpen}
+      onClose={() => setIsLinkedInConsentOpen(false)}
+      onConsentSuccess={() => {
+        setIsLinkedInConsentOpen(false);
+        executeAutomationRun();
+      }}
+      onCancel={() => {
+        setIsLinkedInConsentOpen(false);
+      }}
+    />
+  </>
   );
 };

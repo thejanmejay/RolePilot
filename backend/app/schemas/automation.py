@@ -12,6 +12,7 @@ class AutomationRunCreate(BaseModel):
     max_jobs: Optional[int] = Field(None, ge=1, le=100)
     allow_live_submission: bool = False
     live_submission_confirmation: Optional[str] = None
+    idempotency_key: Optional[str] = Field(None, max_length=128)
 
 
 class AutomationLogResponse(BaseModel):
@@ -33,6 +34,12 @@ class AutomationRunResponse(BaseModel):
     search_config_id: Optional[uuid.UUID] = None
     status: str
     dry_run: bool = False
+    allow_live_submission: bool = False
+    max_jobs: int = 10
+    worker_id: Optional[str] = None
+    attempt_count: int = 0
+    max_attempts: int = 3
+    idempotency_key: Optional[str] = None
     jobs_found: int = 0
     jobs_processed: int = 0
     applications_submitted: int = 0

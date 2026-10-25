@@ -30,11 +30,29 @@ class AutomationService:
                     detail="Search configuration not found or does not belong to user",
                 )
 
+        # Idempotency check: Return existing run if idempotency_key is repeated
+        if run_in.idempotency_key:
+            from backend.app.services.queue_service import QueueService
+            existing = QueueService.check_idempotency(db, user_id, run_in.idempotency_key)
+            if existing:
+                return existing
+
+        # Live submission safety: Capped to 1 job maximum
+        effective_max_jobs = run_in.max_jobs or 10
+        if not run_in.dry_run and run_in.allow_live_submission:
+            effective_max_jobs = 1
+
         run = AutomationRun(
             user_id=user_id,
             search_config_id=run_in.search_config_id,
-            status="queued",
+            status="pending",
             dry_run=run_in.dry_run,
+            allow_live_submission=run_in.allow_live_submission,
+            live_submission_confirmation=run_in.live_submission_confirmation,
+            max_jobs=effective_max_jobs,
+            idempotency_key=run_in.idempotency_key,
+            attempt_count=0,
+            max_attempts=3,
         )
         db.add(run)
         db.commit()
@@ -44,9 +62,14 @@ class AutomationService:
         AutomationService.log_event(
             db=db,
             run_id=run.id,
-            event="RUN_QUEUED",
-            message=f"Automation run {run.id} queued successfully.",
-            metadata_json={"dry_run": run_in.dry_run},
+            event="RUN_PENDING",
+            message=f"Automation run {run.id} created and pending queue worker pickup.",
+            metadata_json={
+                "dry_run": run_in.dry_run,
+                "allow_live_submission": run_in.allow_live_submission,
+                "max_jobs": effective_max_jobs,
+                "idempotency_key": run_in.idempotency_key,
+            },
         )
 
         return run

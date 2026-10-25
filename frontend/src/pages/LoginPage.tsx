@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LogIn, AlertCircle, CheckCircle, Loader2, Key, Terminal, ChevronDown, ChevronUp } from 'lucide-react';
-import { AuthLayout } from '../components/auth/AuthLayout';
+import { AuthSplitLayout } from '../components/auth/AuthSplitLayout';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
 // Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase
@@ -45,7 +45,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Developer token access state
+  // Developer token access state (strictly local development only)
   const [isDevTokenOpen, setIsDevTokenOpen] = useState(false);
   const [devTokenInput, setDevTokenInput] = useState('');
   const [devTokenError, setDevTokenError] = useState<string | null>(null);
@@ -170,15 +170,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   return (
-    <AuthLayout
+    <AuthSplitLayout
       title="Welcome back"
       subtitle="Sign in to access your saved jobs, applications, and workflows"
-      footerText="Don't have an account?"
+      footerPromptText="Don't have an account?"
       footerActionText="Sign up"
+      footerActionId="login-to-signup-link"
       onFooterAction={onNavigateSignup}
       onNavigateHome={onNavigateHome}
       onNavigateTerms={onNavigateTerms}
       onNavigatePrivacy={onNavigatePrivacy}
+      legalActionText="signing in"
     >
       {/* Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase */}
 
@@ -285,110 +287,91 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </>
           )}
         </button>
-
-        <div className="signup-legal-note" style={{ marginTop: '16px' }}>
-          By signing in, you agree to RolePilot's{' '}
-          <a
-            href="/terms"
-            onClick={(e) => {
-              if (!e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                onNavigateTerms?.();
-              }
-            }}
-          >
-            Terms of Service
-          </a>{' '}
-          and{' '}
-          <a
-            href="/privacy"
-            onClick={(e) => {
-              if (!e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                onNavigatePrivacy?.();
-              }
-            }}
-          >
-            Privacy Policy
-          </a>
-          .
-        </div>
       </form>
 
-      {/* Developer / Local Test Token Accordion */}
-      <div className="auth-dev-accordion">
-        <button
-          type="button"
-          onClick={() => setIsDevTokenOpen((prev) => !prev)}
-          className="auth-dev-toggle"
-          aria-expanded={isDevTokenOpen}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Key size={14} color="var(--auth-blue)" />
-            <span>Developer / Local Test Token Access</span>
-          </span>
-          {isDevTokenOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+      {/* Developer / Local Test Token Accordion: strictly excluded from production build */}
+      {import.meta.env.DEV && (
+        <div className="auth-dev-accordion" style={{ marginTop: '20px' }}>
+          <button
+            type="button"
+            onClick={() => setIsDevTokenOpen((prev) => !prev)}
+            className="auth-dev-toggle"
+            aria-expanded={isDevTokenOpen}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Key size={14} color="var(--auth-blue)" />
+              <span>Developer / Local Test Token Access</span>
+            </span>
+            {isDevTokenOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
 
-        {isDevTokenOpen && (
-          <div className="auth-dev-content">
-            <p style={{ fontSize: '0.775rem', color: 'var(--auth-text-muted)', margin: '0 0 8px', lineHeight: '1.4' }}>
-              Run the test token script in your terminal to generate a token:
-            </p>
-            <div
-              style={{
-                backgroundColor: '#1E293B',
-                color: '#F8FAFC',
-                padding: '6px 8px',
-                borderRadius: '6px',
-                fontSize: '0.72rem',
-                fontFamily: 'monospace',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                marginBottom: '10px',
-                userSelect: 'all',
-              }}
-            >
-              <Terminal size={12} color="#38BDF8" />
-              <span>./linkedin-hunter/.venv/bin/python scripts/get_test_token.py</span>
-            </div>
-
-            {devTokenError && (
-              <div role="alert" className="auth-field-error" style={{ marginBottom: '8px' }}>
-                <AlertCircle size={13} />
-                <span>{devTokenError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleDevTokenLogin}>
-              <textarea
-                rows={2}
-                value={devTokenInput}
-                onChange={(e) => setDevTokenInput(e.target.value)}
-                placeholder="Paste eyJhbGci... token here"
+          {isDevTokenOpen && (
+            <div className="auth-dev-content">
+              <p
                 style={{
-                  width: '100%',
-                  fontSize: '0.75rem',
-                  fontFamily: 'monospace',
+                  fontSize: '0.775rem',
+                  color: 'var(--auth-text-muted)',
+                  margin: '0 0 8px',
+                  lineHeight: '1.4',
+                }}
+              >
+                Run the test token script in your terminal to generate a token:
+              </p>
+              <div
+                style={{
+                  backgroundColor: '#1E293B',
+                  color: '#F8FAFC',
                   padding: '6px 8px',
                   borderRadius: '6px',
-                  border: '1px solid var(--auth-border)',
-                  boxSizing: 'border-box',
-                  resize: 'none',
+                  fontSize: '0.72rem',
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginBottom: '10px',
+                  userSelect: 'all',
                 }}
-              />
-              <button
-                type="submit"
-                className="auth-btn-secondary"
-                style={{ width: '100%', height: '32px', fontSize: '0.8rem', marginTop: '6px' }}
               >
-                Sign In with Token
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
-    </AuthLayout>
+                <Terminal size={12} color="#38BDF8" />
+                <span>./linkedin-hunter/.venv/bin/python scripts/get_test_token.py</span>
+              </div>
+
+              {devTokenError && (
+                <div role="alert" className="auth-field-error" style={{ marginBottom: '8px' }}>
+                  <AlertCircle size={13} />
+                  <span>{devTokenError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleDevTokenLogin}>
+                <textarea
+                  rows={2}
+                  value={devTokenInput}
+                  onChange={(e) => setDevTokenInput(e.target.value)}
+                  placeholder="Paste eyJhbGci... token here"
+                  style={{
+                    width: '100%',
+                    fontSize: '0.75rem',
+                    fontFamily: 'monospace',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--auth-border)',
+                    boxSizing: 'border-box',
+                    resize: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="auth-btn-secondary"
+                  style={{ width: '100%', height: '32px', fontSize: '0.8rem', marginTop: '6px' }}
+                >
+                  Sign In with Token
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+    </AuthSplitLayout>
   );
 };

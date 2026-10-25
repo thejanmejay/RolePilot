@@ -35,20 +35,12 @@ def create_automation_run(
     """Create a new automation run and queue the worker task in the background."""
     run = AutomationService.create_run(db, user_id, run_in)
 
-    # Safety enforcement: live submission run is strictly limited to max_jobs=1
-    effective_max_jobs = run_in.max_jobs
-    if not run_in.dry_run and run_in.allow_live_submission:
-        effective_max_jobs = 1
-
-    # Dispatch to background worker
+    # Dispatch to background task runner or queue worker atomically
+    from backend.app.workers.queue_worker import QueueWorker
     background_tasks.add_task(
-        run_linkedin_automation_task,
+        QueueWorker.process_run_by_id,
         run_id=run.id,
         user_id=user_id,
-        dry_run=run_in.dry_run,
-        max_jobs=effective_max_jobs,
-        allow_live_submission=run_in.allow_live_submission,
-        live_submission_confirmation=run_in.live_submission_confirmation,
     )
 
     return run
