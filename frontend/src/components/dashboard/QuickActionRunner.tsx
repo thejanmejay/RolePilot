@@ -3,18 +3,21 @@ import { Play, ShieldCheck, Sliders, ArrowRight, Loader2, Sparkles, MapPin } fro
 import { automationApi } from '../../api/automation';
 import { useToast } from '../../context/ToastContext';
 import { formatErrorMessage } from '../../api/client';
+import { linkedinApi } from '../../api/linkedin';
 import type { SearchConfig } from '../../types/job';
 
 interface QuickActionRunnerProps {
   activeSearchConfig: SearchConfig | null;
   onNavigateTab: (tab: 'profile' | 'jobs' | 'applications' | 'automation') => void;
   onRunTriggered: () => void;
+  onRequireLinkedInConsent?: () => void;
 }
 
 export const QuickActionRunner: React.FC<QuickActionRunnerProps> = ({
   activeSearchConfig,
   onNavigateTab,
   onRunTriggered,
+  onRequireLinkedInConsent,
 }) => {
   const { showSuccess, showError } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -22,6 +25,18 @@ export const QuickActionRunner: React.FC<QuickActionRunnerProps> = ({
   const handleLaunchQuickDryRun = async () => {
     setIsSubmitting(true);
     try {
+      // Gate check: verify LinkedIn connection & consent lifecycle
+      const statusData = await linkedinApi.getStatus().catch(() => null);
+      if (!statusData?.is_connected || !statusData?.has_consent || statusData?.status === 'expired') {
+        if (onRequireLinkedInConsent) {
+          onRequireLinkedInConsent();
+        } else {
+          showError('LinkedIn session connection and automation consent required.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
       await automationApi.createRun({
         search_config_id: activeSearchConfig?.id,
         dry_run: true,

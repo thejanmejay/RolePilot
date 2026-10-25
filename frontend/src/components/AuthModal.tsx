@@ -112,40 +112,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             To view and edit your profile securely, paste your authenticated Supabase user access token.
           </p>
 
-          <div
-            style={{
-              backgroundColor: 'var(--primary-light)',
-              border: '1px solid var(--primary-border)',
-              borderRadius: 'var(--radius-md)',
-              padding: '12px 14px',
-              fontSize: '0.8rem',
-              color: 'var(--primary-hover)',
-              marginBottom: '18px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '10px',
-            }}
-          >
-            <Sparkles size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <strong>Quick command to get your user token:</strong>
-              <code
-                style={{
-                  display: 'block',
-                  backgroundColor: '#ffffff',
-                  padding: '6px 8px',
-                  borderRadius: '4px',
-                  marginTop: '6px',
-                  fontFamily: 'monospace',
-                  color: 'var(--text-main)',
-                  border: '1px solid #cbd5e1',
-                  userSelect: 'all',
-                }}
-              >
-                ./linkedin-hunter/.venv/bin/python scripts/get_test_token.py
-              </code>
+          {import.meta.env.DEV && (
+            <div
+              style={{
+                backgroundColor: 'var(--primary-light)',
+                border: '1px solid var(--primary-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '12px 14px',
+                fontSize: '0.8rem',
+                color: 'var(--primary-hover)',
+                marginBottom: '18px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px',
+              }}
+            >
+              <Sparkles size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong>Quick command to get your user token:</strong>
+                <code
+                  style={{
+                    display: 'block',
+                    backgroundColor: '#ffffff',
+                    padding: '6px 8px',
+                    borderRadius: '4px',
+                    marginTop: '6px',
+                    fontFamily: 'monospace',
+                    color: 'var(--text-main)',
+                    border: '1px solid #cbd5e1',
+                    userSelect: 'all',
+                  }}
+                >
+                  ./linkedin-hunter/.venv/bin/python scripts/get_test_token.py
+                </code>
+              </div>
             </div>
-          </div>
+          )}
 
           {error && (
             <div

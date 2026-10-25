@@ -19,6 +19,8 @@ import { ApplicationFunnel } from '../components/dashboard/ApplicationFunnel';
 import { ReadinessMeter } from '../components/dashboard/ReadinessMeter';
 import { QuickActionRunner } from '../components/dashboard/QuickActionRunner';
 import { RecentActivityFeed } from '../components/dashboard/RecentActivityFeed';
+import { LinkedInStatusCard } from '../components/linkedin/LinkedInStatusCard';
+import { LinkedInConsentModal } from '../components/linkedin/LinkedInConsentModal';
 import { Skeleton, ErrorState } from '../components/common';
 
 interface DashboardPageProps {
@@ -40,6 +42,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const [applications, setApplications] = useState<Application[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [isLinkedInConsentOpen, setIsLinkedInConsentOpen] = useState<boolean>(false);
+  const [statusRefreshKey, setStatusRefreshKey] = useState<number>(0);
 
   const fetchDashboardData = async (isBackground = false) => {
     if (!isBackground) setIsLoading(true);
@@ -357,7 +361,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         }}
       />
 
-      {/* Two Column Section: Recent Activity & Applications (Left) + Quick Action Runner (Right) */}
+      {/* Two Column Section: Recent Activity & Applications (Left) + LinkedIn Connection & Quick Action Runner (Right) */}
       <div className="dashboard-two-col" style={{ marginBottom: '24px' }}>
         <div>
           <RecentActivityFeed
@@ -367,14 +371,36 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           />
         </div>
 
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <LinkedInStatusCard
+            onOpenConnectModal={() => setIsLinkedInConsentOpen(true)}
+            statusRefreshKey={statusRefreshKey}
+          />
+
           <QuickActionRunner
             activeSearchConfig={activeSearchConfig}
             onNavigateTab={onNavigateTab}
-            onRunTriggered={() => fetchDashboardData(true)}
+            onRunTriggered={() => {
+              fetchDashboardData(true);
+              setStatusRefreshKey((k) => k + 1);
+            }}
+            onRequireLinkedInConsent={() => setIsLinkedInConsentOpen(true)}
           />
         </div>
       </div>
+
+      <LinkedInConsentModal
+        isOpen={isLinkedInConsentOpen}
+        onClose={() => setIsLinkedInConsentOpen(false)}
+        onConsentSuccess={() => {
+          setIsLinkedInConsentOpen(false);
+          setStatusRefreshKey((k) => k + 1);
+          fetchDashboardData(true);
+        }}
+        onCancel={() => {
+          setIsLinkedInConsentOpen(false);
+        }}
+      />
     </div>
   );
 };

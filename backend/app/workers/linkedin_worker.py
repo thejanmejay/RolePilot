@@ -185,6 +185,7 @@ async def execute_automation_run(
     max_jobs: Optional[int] = None,
     allow_live_submission: bool = False,
     live_submission_confirmation: Optional[str] = None,
+    worker_id: Optional[str] = None,
 ) -> None:
     """Asynchronous worker task that executes a complete automation run."""
     db = SessionLocal()
@@ -205,6 +206,11 @@ async def execute_automation_run(
         # Transition to running
         run.status = "running"
         run.started_at = datetime.utcnow()
+        if worker_id:
+            run.worker_id = worker_id
+            now_utc = datetime.now(timezone.utc)
+            run.locked_at = run.locked_at or now_utc
+            run.heartbeat_at = now_utc
         db.commit()
         db.refresh(run)
 
@@ -335,9 +341,55 @@ async def execute_automation_run(
             "details": "Session not initialized.",
         }
 
+        engine: Optional[BrowserEngine] = None
         try:
-            # ── 1. HARD SESSION GATE ────────────────────────────────────
-            if not has_valid_session():
+            # ── 1. HARD CONSENT & SESSION GATES ─────────────────────────
+            from backend.app.services.linkedin_session_service import (
+                LinkedInSessionService,
+                POLICY_TYPE_LINKEDIN,
+            )
+            from backend.app.db.models.linkedin_account import LinkedInAccount
+            from backend.app.db.models.policy_acceptance import UserPolicyAcceptance
+
+            # Check explicit permission consent
+            consent = db.execute(
+                select(UserPolicyAcceptance).where(
+                    UserPolicyAcceptance.user_id == run.user_id,
+                    UserPolicyAcceptance.policy_type == POLICY_TYPE_LINKEDIN,
+                )
+            ).scalars().first()
+
+            if not consent:
+                AutomationService.log_event(
+                    db=db,
+                    run_id=run.id,
+                    level="error",
+                    event="CONSENT_REQUIRED",
+                    message="LinkedIn automation consent has not been granted by user.",
+                    metadata_json={"consent_required": True},
+                )
+                run.status = "failed"
+                run.error_message = "LinkedIn permission consent required: Candidate must review and accept the LinkedIn automation purpose before launching."
+                run.completed_at = datetime.utcnow()
+                db.commit()
+                return
+
+            # Retrieve user's encrypted LinkedIn session from database
+            user_account = db.execute(
+                select(LinkedInAccount).where(LinkedInAccount.user_id == run.user_id)
+            ).scalar_one_or_none()
+
+            cookies: Optional[list[dict]] = None
+            if user_account and user_account.encrypted_session:
+                cookies = LinkedInSessionService.decrypt_session(user_account.encrypted_session)
+
+            # Fallback to local cookie file for local CLI compatibility if not in database (non-production only)
+            if not cookies and settings.ENVIRONMENT.lower() != "production":
+                cookies = load_cookies()
+
+            has_li_at = bool(cookies and any(c.get("name") == "li_at" for c in cookies))
+
+            if not has_li_at:
                 AutomationService.log_event(
                     db=db,
                     run_id=run.id,
@@ -347,8 +399,10 @@ async def execute_automation_run(
                     metadata_json={"session_available": False},
                 )
                 run.status = "failed"
-                run.error_message = "LinkedIn session authentication failed: No cookie session available."
+                run.error_message = "LinkedIn session authentication failed: No cookie session available. Please connect LinkedIn in RolePilot."
                 run.completed_at = datetime.utcnow()
+                if user_account and user_account.status == "connected":
+                    user_account.status = "expired"
                 db.commit()
 
                 AutomationService.log_event(
@@ -356,7 +410,7 @@ async def execute_automation_run(
                     run_id=run.id,
                     level="error",
                     event="RUN_FAILED",
-                    message="Automation run failed: LinkedIn authentication required.",
+                    message="Automation run failed: LinkedIn session authentication required.",
                     metadata_json={"error": "SESSION_UNAVAILABLE"},
                 )
                 return
@@ -372,11 +426,10 @@ async def execute_automation_run(
             )
             engine = BrowserEngine(hunter_config)
             page = await engine.launch(headless=use_headless)
-            cookies = load_cookies()
             if cookies:
                 await engine.load_cookies(cookies)
 
-            session_health = await check_session_health(page)
+            session_health = await check_session_health(page, cookies=cookies)
             if not session_health["authenticated"]:
                 AutomationService.log_event(
                     db=db,
@@ -386,8 +439,11 @@ async def execute_automation_run(
                     message=f"LinkedIn session invalid: {session_health['details']}",
                     metadata_json=session_health,
                 )
+                if user_account:
+                    user_account.status = "expired"
+
                 run.status = "failed"
-                run.error_message = f"LinkedIn session authentication failed: {session_health['details']}"
+                run.error_message = f"LinkedIn session authentication failed: {session_health['details']}. Please reconnect your LinkedIn session."
                 run.completed_at = datetime.utcnow()
                 db.commit()
 
@@ -402,6 +458,11 @@ async def execute_automation_run(
                 return
 
             # Session is authenticated
+            if user_account:
+                user_account.status = "connected"
+                user_account.last_login_at = datetime.utcnow()
+                db.commit()
+
             AutomationService.log_event(
                 db=db,
                 run_id=run.id,
@@ -411,14 +472,19 @@ async def execute_automation_run(
             )
 
             for job in discovered_jobs:
-                # Check for cancellation before each step
-                db.refresh(run)
-                if run.status == "cancelled":
+                # Update lease heartbeat and check for cooperative cancellation before each job
+                from backend.app.services.queue_service import QueueService
+                is_active = QueueService.update_heartbeat(
+                    db=db,
+                    run_id=run.id,
+                    worker_id=worker_id or run.worker_id or "default",
+                )
+                if not is_active:
                     AutomationService.log_event(
                         db=db,
                         run_id=run.id,
                         event="RUN_CANCELLED",
-                        message="Run was cancelled by user.",
+                        message="Run was cancelled or lease invalidated.",
                     )
                     return
 
@@ -590,6 +656,17 @@ async def execute_automation_run(
                             message=f"Application failed for {job.title}: {playwright_res.get('error_message')}",
                             metadata_json={"job_id": str(job.id), "error": playwright_res.get("error_message")},
                         )
+
+                        # Ambiguous outcome safeguard: If live submission was attempted but outcome is ambiguous,
+                        # flag as needs_reconciliation to prevent duplicate submissions.
+                        if is_real_submission_authorized and playwright_res.get("submission_attempted"):
+                            from backend.app.services.queue_service import QueueService
+                            QueueService.mark_needs_reconciliation(
+                                db=db,
+                                run_id=run.id,
+                                reason=f"Application submission outcome was ambiguous for '{job.title}'. Flagged for reconciliation to prevent duplicate submissions.",
+                            )
+                            return
 
                 else:
                     # Skipped due to qualification

@@ -4,14 +4,8 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
-  Compass,
-  LayoutGrid,
-  Zap,
-  ShieldCheck,
-  Sparkles,
-  ArrowLeft,
 } from 'lucide-react';
-import { RolePilotLogo } from '../components/common/RolePilotLogo';
+import { AuthSplitLayout } from '../components/auth/AuthSplitLayout';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
 // Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase
@@ -192,308 +186,192 @@ export const SignupPage: React.FC<SignupPageProps> = ({
   };
 
   return (
-    <div className="signup-split-layout">
-      {/* Left Panel: Brand & Benefits */}
-      <aside className="signup-split-left" aria-label="RolePilot Overview">
-        <div className="signup-brand-header">
-          <RolePilotLogo variant="compact" height={36} colorMode="dark" transparent />
-          <span className="signup-tagline-badge">
-            <Sparkles size={13} color="#FFAD18" />
-            <span>Your Career. Your Next Move.</span>
-          </span>
-        </div>
+    <AuthSplitLayout
+      title="Create your account"
+      subtitle="Get started with RolePilot."
+      footerPromptText="Already have an account?"
+      footerActionText="Log in"
+      footerActionId="signup-to-login-link"
+      onFooterAction={onNavigateLogin}
+      onNavigateHome={onNavigateHome}
+      onNavigateTerms={onNavigateTerms}
+      onNavigatePrivacy={onNavigatePrivacy}
+      legalActionText="creating an account"
+    >
+      {/* Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase */}
 
-        <div className="signup-brand-body">
-          <h1 className="signup-brand-headline">Make your next career move count.</h1>
-          <p className="signup-brand-desc">
-            Discover opportunities, streamline applications, and keep your job search organized in
-            one place.
-          </p>
-
-          <div className="signup-benefits-list">
-            <div className="signup-benefit-item">
-              <div className="signup-benefit-icon-wrapper">
-                <Compass size={20} />
-              </div>
-              <div>
-                <h3 className="signup-benefit-title">Discover relevant job opportunities</h3>
-                <p className="signup-benefit-text">
-                  Surface qualified roles matching your verified skills, experience, and targeted
-                  career preferences.
-                </p>
-              </div>
-            </div>
-
-            <div className="signup-benefit-item">
-              <div className="signup-benefit-icon-wrapper">
-                <LayoutGrid size={20} />
-              </div>
-              <div>
-                <h3 className="signup-benefit-title">Keep applications and progress organized</h3>
-                <p className="signup-benefit-text">
-                  Track application histories, interview stages, and follow-ups in a centralized,
-                  clean workspace.
-                </p>
-              </div>
-            </div>
-
-            <div className="signup-benefit-item">
-              <div className="signup-benefit-icon-wrapper">
-                <Zap size={20} />
-              </div>
-              <div>
-                <h3 className="signup-benefit-title">Spend less time on repetitive tasks</h3>
-                <p className="signup-benefit-text">
-                  Eliminate duplicate form entries and streamline multi-step application preparation
-                  efficiently.
-                </p>
-              </div>
-            </div>
+      <form onSubmit={handleSubmit} className="auth-form" noValidate>
+        {generalError && (
+          <div role="alert" className="auth-alert auth-alert-error">
+            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>{generalError}</div>
           </div>
-        </div>
+        )}
 
-        <div className="signup-brand-footer">
-          <ShieldCheck size={16} color="#38BDF8" style={{ flexShrink: 0 }} />
-          <span>User-controlled application workflows &mdash; your career, your rules.</span>
-        </div>
-      </aside>
-
-      {/* Right Panel: Signup Form */}
-      <main className="signup-split-right">
-        <div className="signup-form-top-bar">
-          <button
-            type="button"
-            onClick={onNavigateHome}
-            className="auth-back-link"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        {successMessage && (
+          <div
+            role="status"
+            className="auth-alert auth-alert-success"
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
           >
-            <ArrowLeft size={16} />
-            <span>Back to home</span>
-          </button>
-        </div>
-
-        <div className="signup-form-card">
-          <div className="signup-form-header">
-            <h2 className="signup-form-title">Create your account</h2>
-            <p className="signup-form-subtitle">Get started with RolePilot.</p>
-          </div>
-
-          {/* Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase */}
-
-          <form onSubmit={handleSubmit} className="auth-form" noValidate>
-            {generalError && (
-              <div role="alert" className="auth-alert auth-alert-error">
-                <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div>{generalError}</div>
-              </div>
-            )}
-
-            {successMessage && (
-              <div
-                role="status"
-                className="auth-alert auth-alert-success"
-                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                  <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-                  <div style={{ fontWeight: 500, lineHeight: 1.5 }}>{successMessage}</div>
-                </div>
-                {successMessage.includes('confirm your identity') && (
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-                    <button
-                      type="button"
-                      onClick={onNavigateLogin}
-                      className="auth-btn-secondary"
-                      style={{ height: '32px', fontSize: '0.8rem', padding: '0 12px' }}
-                    >
-                      Click here to Log in
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onNavigateVerifyEmail(email.trim())}
-                      className="auth-text-link"
-                      style={{ fontSize: '0.8rem' }}
-                    >
-                      Go to verification screen →
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <FormField
-              id="signup-fullname"
-              label="Full name"
-              type="text"
-              required
-              autoComplete="name"
-              placeholder="e.g. Alex Morgan"
-              value={fullName}
-              error={touched.fullName ? errors.fullName : undefined}
-              onChange={(e) => handleChange('fullName', e.target.value)}
-              onBlur={(e) => handleBlur('fullName', e.target.value)}
-              disabled={isSubmitting}
-            />
-
-            <FormField
-              id="signup-email"
-              label="Email address"
-              type="email"
-              required
-              autoComplete="email"
-              placeholder="you@company.com"
-              value={email}
-              error={touched.email ? errors.email : undefined}
-              onChange={(e) => handleChange('email', e.target.value)}
-              onBlur={(e) => handleBlur('email', e.target.value)}
-              disabled={isSubmitting}
-            />
-
-            <PasswordField
-              id="signup-password"
-              label="Password"
-              required
-              autoComplete="new-password"
-              placeholder="At least 8 characters"
-              helperText="Minimum 8 characters"
-              value={password}
-              error={touched.password ? errors.password : undefined}
-              onChange={(e) => handleChange('password', e.target.value)}
-              onBlur={(e) => handleBlur('password', e.target.value)}
-              disabled={isSubmitting}
-            />
-
-            <PasswordField
-              id="signup-confirm-password"
-              label="Confirm password"
-              required
-              autoComplete="new-password"
-              placeholder="Re-enter password"
-              value={confirmPassword}
-              error={touched.confirmPassword ? errors.confirmPassword : undefined}
-              onChange={(e) => handleChange('confirmPassword', e.target.value)}
-              onBlur={(e) => handleBlur('confirmPassword', e.target.value)}
-              disabled={isSubmitting}
-            />
-
-            {/* Terms & Privacy acceptance checkbox */}
-            <div>
-              <label className="auth-checkbox-row" htmlFor="signup-terms">
-                <input
-                  id="signup-terms"
-                  type="checkbox"
-                  checked={agreeTerms}
-                  onChange={(e) => {
-                    setAgreeTerms(e.target.checked);
-                    if (touched.terms) {
-                      setErrors((prev) => ({
-                        ...prev,
-                        terms: !e.target.checked
-                          ? 'You must agree to the Terms and Privacy Policy.'
-                          : '',
-                      }));
-                    }
-                  }}
-                  className="auth-checkbox"
-                  disabled={isSubmitting}
-                />
-                <span className="auth-checkbox-label">
-                  I agree to the{' '}
-                  <a
-                    href="/terms"
-                    onClick={(e) => {
-                      if (!e.metaKey && !e.ctrlKey) {
-                        e.preventDefault();
-                        onNavigateTerms?.();
-                      }
-                    }}
-                  >
-                    Terms of Service
-                  </a>{' '}
-                  and{' '}
-                  <a
-                    href="/privacy"
-                    onClick={(e) => {
-                      if (!e.metaKey && !e.ctrlKey) {
-                        e.preventDefault();
-                        onNavigatePrivacy?.();
-                      }
-                    }}
-                  >
-                    Privacy Policy
-                  </a>
-                  .
-                </span>
-              </label>
-              {touched.terms && errors.terms && (
-                <div role="alert" className="auth-field-error" style={{ marginTop: '4px' }}>
-                  <AlertCircle size={14} />
-                  <span>{errors.terms}</span>
-                </div>
-              )}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ fontWeight: 500, lineHeight: 1.5 }}>{successMessage}</div>
             </div>
+            {successMessage.includes('confirm your identity') && (
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary"
+                  style={{ height: '32px', fontSize: '0.8rem', padding: '0 12px' }}
+                >
+                  Click here to Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateVerifyEmail(email.trim())}
+                  className="auth-text-link"
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  Go to verification screen →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
-            <button
-              type="submit"
-              className="auth-btn-primary"
+        <FormField
+          id="signup-fullname"
+          label="Full name"
+          type="text"
+          required
+          autoComplete="name"
+          placeholder="e.g. Alex Morgan"
+          value={fullName}
+          error={touched.fullName ? errors.fullName : undefined}
+          onChange={(e) => handleChange('fullName', e.target.value)}
+          onBlur={(e) => handleBlur('fullName', e.target.value)}
+          disabled={isSubmitting}
+        />
+
+        <FormField
+          id="signup-email"
+          label="Email address"
+          type="email"
+          required
+          autoComplete="email"
+          placeholder="you@company.com"
+          value={email}
+          error={touched.email ? errors.email : undefined}
+          onChange={(e) => handleChange('email', e.target.value)}
+          onBlur={(e) => handleBlur('email', e.target.value)}
+          disabled={isSubmitting}
+        />
+
+        <PasswordField
+          id="signup-password"
+          label="Password"
+          required
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
+          helperText="Minimum 8 characters"
+          value={password}
+          error={touched.password ? errors.password : undefined}
+          onChange={(e) => handleChange('password', e.target.value)}
+          onBlur={(e) => handleBlur('password', e.target.value)}
+          disabled={isSubmitting}
+        />
+
+        <PasswordField
+          id="signup-confirm-password"
+          label="Confirm password"
+          required
+          autoComplete="new-password"
+          placeholder="Re-enter password"
+          value={confirmPassword}
+          error={touched.confirmPassword ? errors.confirmPassword : undefined}
+          onChange={(e) => handleChange('confirmPassword', e.target.value)}
+          onBlur={(e) => handleBlur('confirmPassword', e.target.value)}
+          disabled={isSubmitting}
+        />
+
+        {/* Terms & Privacy acceptance checkbox */}
+        <div>
+          <label className="auth-checkbox-row" htmlFor="signup-terms">
+            <input
+              id="signup-terms"
+              type="checkbox"
+              checked={agreeTerms}
+              onChange={(e) => {
+                setAgreeTerms(e.target.checked);
+                if (touched.terms) {
+                  setErrors((prev) => ({
+                    ...prev,
+                    terms: !e.target.checked
+                      ? 'You must agree to the Terms and Privacy Policy.'
+                      : '',
+                  }));
+                }
+              }}
+              className="auth-checkbox"
               disabled={isSubmitting}
-              id="create-account-submit-btn"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={18} className="spin-animation" />
-                  <span>Creating account...</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus size={18} />
-                  <span>Create account</span>
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="signup-login-prompt">
-            Already have an account?{' '}
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-text-link"
-              id="signup-to-login-link"
-            >
-              Log in
-            </button>
-          </div>
-
-          <div className="signup-legal-note">
-            By creating an account, you agree to RolePilot's{' '}
-            <a
-              href="/terms"
-              onClick={(e) => {
-                if (!e.metaKey && !e.ctrlKey) {
-                  e.preventDefault();
-                  onNavigateTerms?.();
-                }
-              }}
-            >
-              Terms of Service
-            </a>{' '}
-            and{' '}
-            <a
-              href="/privacy"
-              onClick={(e) => {
-                if (!e.metaKey && !e.ctrlKey) {
-                  e.preventDefault();
-                  onNavigatePrivacy?.();
-                }
-              }}
-            >
-              Privacy Policy
-            </a>
-            .
-          </div>
+            />
+            <span className="auth-checkbox-label">
+              I agree to the{' '}
+              <a
+                href="/terms"
+                onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey) {
+                    e.preventDefault();
+                    onNavigateTerms?.();
+                  }
+                }}
+              >
+                Terms of Service
+              </a>{' '}
+              and{' '}
+              <a
+                href="/privacy"
+                onClick={(e) => {
+                  if (!e.metaKey && !e.ctrlKey) {
+                    e.preventDefault();
+                    onNavigatePrivacy?.();
+                  }
+                }}
+              >
+                Privacy Policy
+              </a>
+              .
+            </span>
+          </label>
+          {touched.terms && errors.terms && (
+            <div role="alert" className="auth-field-error" style={{ marginTop: '4px' }}>
+              <AlertCircle size={14} />
+              <span>{errors.terms}</span>
+            </div>
+          )}
         </div>
-      </main>
-    </div>
+
+        <button
+          type="submit"
+          className="auth-btn-primary"
+          disabled={isSubmitting}
+          id="create-account-submit-btn"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 size={18} className="spin-animation" />
+              <span>Creating account...</span>
+            </>
+          ) : (
+            <>
+              <UserPlus size={18} />
+              <span>Create account</span>
+            </>
+          )}
+        </button>
+      </form>
+    </AuthSplitLayout>
   );
 };

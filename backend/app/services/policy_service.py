@@ -91,7 +91,12 @@ class PolicyService:
         # Ensure user profile exists to satisfy foreign key constraint
         profile = db.get(Profile, user_id)
         if not profile:
-            profile = Profile(id=user_id, email=f"user_{user_id}@example.com")
+            profile = Profile(
+                id=user_id,
+                email=f"user_{user_id}@example.com",
+                first_name="Candidate",
+                last_name="",
+            )
             db.add(profile)
             db.flush()
 

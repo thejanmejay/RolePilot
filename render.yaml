@@ -1,0 +1,53 @@
+# RolePilot Render Blueprint Specification
+# Defines the web service (FastAPI) and durable background worker (QueueWorker)
+services:
+  - type: web
+    name: rolepilot-api
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: ./scripts/render_build.sh
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SESSION_ENCRYPTION_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://rolepilot-frontend-phi.vercel.app
+
+  - type: worker
+    name: rolepilot-queue-worker
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: ./scripts/render_build.sh
+    startCommand: python -m backend.app.workers.queue_worker
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SESSION_ENCRYPTION_KEY
+        sync: false

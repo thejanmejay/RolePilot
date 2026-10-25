@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     SUPABASE_JWKS_URL: str = Field(default="", validation_alias="SUPABASE_JWKS_URL")
     FRONTEND_ORIGIN: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_ORIGIN")
     
+    # LinkedIn Session Storage Encryption Key (Dedicated secret)
+    SESSION_ENCRYPTION_KEY: Optional[str] = Field(default=None, validation_alias="SESSION_ENCRYPTION_KEY")
+    
     # Platform Policy and Terms Consent Configuration
     ACTIVE_POLICY_VERSION: str = Field(default="draft-1", validation_alias="ACTIVE_POLICY_VERSION")
     ACTIVE_POLICY_TYPE: str = Field(default="platform_terms", validation_alias="ACTIVE_POLICY_TYPE")

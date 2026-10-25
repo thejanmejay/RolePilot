@@ -36,8 +36,20 @@ class AutomationRun(Base):
         ForeignKey("search_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(Text, default="queued", nullable=False)
+    status: Mapped[str] = mapped_column(Text, default="pending", nullable=False)
     dry_run: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    allow_live_submission: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    live_submission_confirmation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_jobs: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    
+    # Durable Queue and Lease Management
+    worker_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+
     jobs_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     jobs_processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     applications_submitted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
