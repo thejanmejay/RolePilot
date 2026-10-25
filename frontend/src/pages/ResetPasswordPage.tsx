@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   getPasswordRecoveryLinkError,
   parseRecoveryLinkParams,
+  mapPasswordUpdateError,
   type PasswordRecoveryState,
 } from '../services/passwordRecoveryFlow';
 
@@ -147,10 +148,10 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
           onSuccess();
         }, 1200);
       } else {
-        setError(res.error || 'Failed to update password. Your reset link may have expired.');
+        setError(res.error || mapPasswordUpdateError(null));
       }
-    } catch {
-      setError('The password could not be updated. Your reset link may have expired; request a new one and try again.');
+    } catch (err: unknown) {
+      setError(mapPasswordUpdateError(err as import('../services/passwordRecoveryFlow').SupabaseAuthErrorLike));
     } finally {
       setIsSubmitting(false);
     }
