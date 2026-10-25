@@ -83,7 +83,8 @@ def client(test_user, db_session):
     app.dependency_overrides[get_current_user_id] = override_get_current_user_id
     with TestClient(app) as c:
         yield c
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_current_user_id, None)
+    app.dependency_overrides[get_db] = override_get_db
 
 
 def test_encryption_roundtrip():

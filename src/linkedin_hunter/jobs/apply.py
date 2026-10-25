@@ -865,7 +865,8 @@ async def _dismiss_modal(page, log_event_cb: Optional[Callable] = None) -> None:
         )
         if dialog_el:
             # Check if this dialog contains Save/Discard prompt
-            dialog_text = ((await dialog_el.text_content()) or "").lower()
+            raw_text = await dialog_el.text_content()
+            dialog_text = raw_text.lower() if isinstance(raw_text, str) else ""
             if "save" in dialog_text or "discard" in dialog_text or "return to this application" in dialog_text:
                 if log_event_cb:
                     log_event_cb("SAVE_EXIT_DIALOG_DETECTED", "Detected LinkedIn Save/Discard confirmation dialog. Clicking Discard.", "info")

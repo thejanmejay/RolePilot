@@ -15,6 +15,7 @@ from typing import List, Optional
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
+from backend.app.core.config import settings
 from backend.app.db.database import SessionLocal
 from backend.app.db.models.application import Application
 from backend.app.db.models.automation_run import AutomationRun

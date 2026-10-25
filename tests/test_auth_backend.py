@@ -60,7 +60,7 @@ def test_invalid_signature_returns_401():
         "email": "user_a@example.com",
         "exp": int(datetime.now(timezone.utc).timestamp()) + 3600,
     }
-    wrong_token = jwt.encode(wrong_payload, "completely-wrong-secret-key-123", algorithm="HS256")
+    wrong_token = jwt.encode(wrong_payload, "completely-wrong-secret-key-1234567890", algorithm="HS256")
     r = client.get("/api/v1/profile", headers={"Authorization": f"Bearer {wrong_token}"})
     assert r.status_code == 401
 

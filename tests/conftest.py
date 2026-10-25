@@ -1,6 +1,7 @@
 """Shared pytest configuration, database fixtures, and authentication tokens."""
 
 import io
+import sys
 import uuid
 from datetime import datetime, timezone
 
@@ -10,6 +11,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# Unify module registration so 'conftest' and 'tests.conftest' point to the exact same module instance
+_current_module = sys.modules[__name__]
+sys.modules["tests.conftest"] = _current_module
+sys.modules["conftest"] = _current_module
 
 from backend.app.core.config import settings
 from backend.app.db.database import Base, get_db
@@ -64,6 +70,14 @@ def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture(autouse=True)
+def reset_db_override():
+    """Ensure FastAPI dependency override for get_db is always active."""
+    app.dependency_overrides[get_db] = override_get_db
+    yield
+    app.dependency_overrides[get_db] = override_get_db
 
 TEST_SECRET = "test-super-secure-secret-key-for-jwt-signing-1234567890"
 settings.SUPABASE_JWT_SECRET = TEST_SECRET
