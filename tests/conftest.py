@@ -33,6 +33,11 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_
 
 Base.metadata.create_all(bind=test_engine)
 
+# Ensure background workers importing SessionLocal from database get the test database session
+import backend.app.db.database as db_module
+db_module.SessionLocal = TestingSessionLocal
+db_module.engine = test_engine
+
 USER_A_ID = uuid.UUID("a0000000-0000-0000-0000-000000000001")
 USER_B_ID = uuid.UUID("b0000000-0000-0000-0000-000000000002")
 USER_UNACCEPTED_ID = uuid.UUID("c0000000-0000-0000-0000-000000000003")

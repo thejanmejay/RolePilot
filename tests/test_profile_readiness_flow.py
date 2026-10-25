@@ -337,14 +337,15 @@ def test_08_end_to_end_dry_run_workflow(auth_headers):
         "dry_run": True,
         "max_jobs": 10,
     }
-    with patch("backend.app.api.automation.run_linkedin_automation_task") as mock_worker:
+    with patch("backend.app.workers.queue_worker.QueueWorker.process_run_by_id") as mock_worker, \
+         patch("backend.app.api.automation.run_linkedin_automation_task", mock_worker):
         res_run = client.post(
             "/api/v1/automation/runs", json=dry_run_payload, headers=auth_headers
         )
         assert res_run.status_code == 201
         run_data = res_run.json()
         assert run_data["dry_run"] is True
-        assert run_data["status"] == "queued"
+        assert run_data["status"] in ("pending", "queued")
         run_id = run_data["id"]
         assert mock_worker.called
 

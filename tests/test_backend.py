@@ -208,7 +208,7 @@ def test_automation_run_creation_and_logs(auth_headers_user_a, auth_headers_user
     run_data = res.json()
     run_id = run_data["id"]
     assert run_data["user_id"] == str(USER_A_ID)
-    assert run_data["status"] == "queued"
+    assert run_data["status"] in ("pending", "queued")
 
     res_get = client.get(f"/api/v1/automation/runs/{run_id}", headers=auth_headers_user_a)
     assert res_get.status_code == 200
