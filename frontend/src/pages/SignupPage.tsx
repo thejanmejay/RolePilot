@@ -14,7 +14,8 @@ import {
 import { RolePilotLogo } from '../components/common/RolePilotLogo';
 import { FormField } from '../components/auth/FormField';
 import { PasswordField } from '../components/auth/PasswordField';
-import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
+// Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase
+// import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,6 +25,8 @@ interface SignupPageProps {
   onNavigateDashboard?: () => void;
   onSuccess?: () => void;
   onNavigateVerifyEmail: (email: string) => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const SignupPage: React.FC<SignupPageProps> = ({
@@ -32,6 +35,8 @@ export const SignupPage: React.FC<SignupPageProps> = ({
   onNavigateDashboard,
   onSuccess,
   onNavigateVerifyEmail,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   const { login } = useAuth();
 
@@ -159,10 +164,13 @@ export const SignupPage: React.FC<SignupPageProps> = ({
       }
 
       if (res.requiresEmailVerification) {
-        setSuccessMessage("Account created! We've sent a verification link to your email address.");
+        setSuccessMessage(
+          "Please check your email and confirm your identity. If your account does not exist, you will receive the email. If your account already exists, please click on Log in."
+        );
+        setIsSubmitting(false);
         setTimeout(() => {
           onNavigateVerifyEmail(email.trim());
-        }, 500);
+        }, 3000);
         return;
       }
 
@@ -270,15 +278,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({
             <p className="signup-form-subtitle">Get started with RolePilot.</p>
           </div>
 
-          <GoogleAuthButton
-            label="Sign up with Google"
-            onError={(err) => setGeneralError(err)}
-            disabled={isSubmitting}
-          />
-
-          <div className="auth-divider">
-            <span>or sign up with email</span>
-          </div>
+          {/* Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase */}
 
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
             {generalError && (
@@ -289,9 +289,35 @@ export const SignupPage: React.FC<SignupPageProps> = ({
             )}
 
             {successMessage && (
-              <div role="status" className="auth-alert auth-alert-success">
-                <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div>{successMessage}</div>
+              <div
+                role="status"
+                className="auth-alert auth-alert-success"
+                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ fontWeight: 500, lineHeight: 1.5 }}>{successMessage}</div>
+                </div>
+                {successMessage.includes('confirm your identity') && (
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={onNavigateLogin}
+                      className="auth-btn-secondary"
+                      style={{ height: '32px', fontSize: '0.8rem', padding: '0 12px' }}
+                    >
+                      Click here to Log in
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateVerifyEmail(email.trim())}
+                      className="auth-text-link"
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      Go to verification screen →
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -374,18 +400,24 @@ export const SignupPage: React.FC<SignupPageProps> = ({
                 <span className="auth-checkbox-label">
                   I agree to the{' '}
                   <a
-                    href="#terms"
+                    href="/terms"
                     onClick={(e) => {
-                      e.preventDefault();
+                      if (!e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        onNavigateTerms?.();
+                      }
                     }}
                   >
                     Terms of Service
                   </a>{' '}
                   and{' '}
                   <a
-                    href="#privacy"
+                    href="/privacy"
                     onClick={(e) => {
-                      e.preventDefault();
+                      if (!e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        onNavigatePrivacy?.();
+                      }
                     }}
                   >
                     Privacy Policy
@@ -434,7 +466,31 @@ export const SignupPage: React.FC<SignupPageProps> = ({
           </div>
 
           <div className="signup-legal-note">
-            By creating an account, you agree that RolePilot enables user-directed workflows.
+            By creating an account, you agree to RolePilot's{' '}
+            <a
+              href="/terms"
+              onClick={(e) => {
+                if (!e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  onNavigateTerms?.();
+                }
+              }}
+            >
+              Terms of Service
+            </a>{' '}
+            and{' '}
+            <a
+              href="/privacy"
+              onClick={(e) => {
+                if (!e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  onNavigatePrivacy?.();
+                }
+              }}
+            >
+              Privacy Policy
+            </a>
+            .
           </div>
         </div>
       </main>

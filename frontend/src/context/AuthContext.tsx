@@ -35,38 +35,80 @@ function parseJwtEmail(token: string): string | null {
   }
 }
 
+export function hasStoredAuthSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (localStorage.getItem('supabase_access_token')) return true;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const val = localStorage.getItem(key);
+        if (val && val !== '{}' && val !== 'null') return true;
+      }
+    }
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (hash.includes('access_token=') || search.includes('code=')) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem('supabase_access_token');
+    try {
+      return localStorage.getItem('supabase_access_token');
+    } catch {
+      return null;
+    }
   });
 
   const [email, setEmail] = useState<string | null>(() => {
-    const saved = localStorage.getItem('supabase_access_token');
-    return saved ? parseJwtEmail(saved) : null;
+    try {
+      const saved = localStorage.getItem('supabase_access_token');
+      return saved ? parseJwtEmail(saved) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return hasStoredAuthSession();
+  });
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   const login = useCallback((newToken: string, newSession?: Session | null, newUser?: User | null) => {
     const trimmed = newToken.trim();
-    localStorage.setItem('supabase_access_token', trimmed);
+    try {
+      localStorage.setItem('supabase_access_token', trimmed);
+    } catch {
+      // Safe fallback
+    }
     setToken(trimmed);
     setEmail(newUser?.email || parseJwtEmail(trimmed));
     if (newUser) setUser(newUser);
     if (newSession) setSession(newSession);
+    setIsLoading(false);
   }, []);
 
   const logout = useCallback(async () => {
-    await authService.signOut();
-    localStorage.removeItem('supabase_access_token');
+    try {
+      await authService.signOut();
+    } catch {
+      authService.clearLocalClientData();
+    }
     setToken(null);
     setEmail(null);
     setUser(null);
     setSession(null);
     setIsPasswordRecovery(false);
+    setIsLoading(false);
+
+    window.dispatchEvent(new CustomEvent('auth:logout'));
+    window.dispatchEvent(new CustomEvent('auth:cleared'));
   }, []);
 
   const clearPasswordRecovery = useCallback(() => {
@@ -82,7 +124,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-        // Fetch authoritative server state using getUser() to avoid stale JWT flags
         let currentUser = data.session.user;
         try {
           const { data: userData } = await supabase.auth.getUser();
@@ -101,35 +142,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const accessToken = data.session.access_token;
           setToken(accessToken);
           setEmail(currentUser?.email || parseJwtEmail(accessToken));
-          localStorage.setItem('supabase_access_token', accessToken);
+          try {
+            localStorage.setItem('supabase_access_token', accessToken);
+          } catch {
+            // Safe fallback
+          }
         } else {
-          // Unconfirmed account: block access to protected application features
           setToken(null);
           setEmail(currentUser?.email || null);
-          localStorage.removeItem('supabase_access_token');
+          try {
+            localStorage.removeItem('supabase_access_token');
+          } catch {
+            // Safe fallback
+          }
         }
       } else {
-        localStorage.removeItem('supabase_access_token');
+        authService.clearLocalClientData();
         setToken(null);
         setEmail(null);
         setUser(null);
         setSession(null);
+        window.dispatchEvent(new CustomEvent('auth:cleared'));
       }
     } catch {
       console.warn('Session restoration failed. Please sign in again.');
+      authService.clearLocalClientData();
       setToken(null);
       setEmail(null);
       setUser(null);
       setSession(null);
-      localStorage.removeItem('supabase_access_token');
+      window.dispatchEvent(new CustomEvent('auth:cleared'));
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    // 1. Initial session check on mount
-    refreshSession();
+    // 1. Initial session check on mount only if potential session exists
+    if (hasStoredAuthSession()) {
+      refreshSession();
+    } else {
+      setIsLoading(false);
+    }
 
     // 2. Listen to Supabase auth state changes
     if (supabase) {
@@ -151,30 +205,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (isConfirmed) {
                 setToken(currentSession.access_token);
                 setEmail(currentUser?.email || parseJwtEmail(currentSession.access_token));
-                localStorage.setItem('supabase_access_token', currentSession.access_token);
+                try {
+                  localStorage.setItem('supabase_access_token', currentSession.access_token);
+                } catch {
+                  // Safe fallback
+                }
               } else {
                 setToken(null);
                 setEmail(currentUser?.email || null);
-                localStorage.removeItem('supabase_access_token');
+                try {
+                  localStorage.removeItem('supabase_access_token');
+                } catch {
+                  // Safe fallback
+                }
               }
+            } else {
+              setToken(null);
+              setEmail(null);
+              setUser(null);
+              setSession(null);
+              authService.clearLocalClientData();
+              window.dispatchEvent(new CustomEvent('auth:cleared'));
             }
           } else if (event === 'SIGNED_OUT') {
             setIsPasswordRecovery(false);
-            localStorage.removeItem('supabase_access_token');
             setToken(null);
             setEmail(null);
             setUser(null);
             setSession(null);
+            authService.clearLocalClientData();
+            window.dispatchEvent(new CustomEvent('auth:cleared'));
           }
           setIsLoading(false);
         }
       );
 
+      // 3. Listen for external storage clearing (e.g. Chrome DevTools -> Application -> Clear site data)
+      const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === null || e.key === 'supabase_access_token' || (e.key && e.key.startsWith('sb-'))) {
+          if (!hasStoredAuthSession()) {
+            setToken(null);
+            setEmail(null);
+            setUser(null);
+            setSession(null);
+            setIsPasswordRecovery(false);
+            setIsLoading(false);
+            authService.clearLocalClientData();
+            window.dispatchEvent(new CustomEvent('auth:cleared'));
+          }
+        }
+      };
+
+      // 4. Revalidate session when tab becomes visible
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          if (token && !hasStoredAuthSession()) {
+            logout();
+          }
+        }
+      };
+
+      window.addEventListener('storage', handleStorageChange);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       return () => {
         authListener.subscription.unsubscribe();
+        window.removeEventListener('storage', handleStorageChange);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
-  }, [refreshSession]);
+  }, [refreshSession, token, logout]);
 
   useEffect(() => {
     const handleUnauthorized = () => {

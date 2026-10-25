@@ -1,3 +1,9 @@
+/**
+ * Google OAuth Button component.
+ * NOTE: Google sign-in is intentionally hidden in the user interface (LoginPage and SignupPage)
+ * until Google OAuth credentials (Client ID and Secret) are configured in Supabase.
+ * Do not delete this component; it is kept intact for immediate re-activation once credentials are ready.
+ */
 import React, { useState } from 'react';
 import { authService } from '../../services/authService';
 import { Loader2 } from 'lucide-react';

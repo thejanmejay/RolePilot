@@ -16,6 +16,8 @@ interface ResetPasswordPageProps {
   onNavigateLogin: () => void;
   onNavigateHome: () => void;
   onNavigateForgotPassword: () => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
@@ -23,6 +25,8 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
   onNavigateLogin,
   onNavigateHome,
   onNavigateForgotPassword,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   const { isLoading: isAuthLoading, isPasswordRecovery, session, clearPasswordRecovery } = useAuth();
   const [password, setPassword] = useState('');
@@ -165,6 +169,8 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({
       footerActionText="Log in"
       onFooterAction={onNavigateLogin}
       onNavigateHome={onNavigateHome}
+      onNavigateTerms={onNavigateTerms}
+      onNavigatePrivacy={onNavigatePrivacy}
     >
       {recoveryState === 'checking' ? (
         <div role="status" className="auth-alert">

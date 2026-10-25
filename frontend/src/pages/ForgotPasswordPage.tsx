@@ -7,11 +7,15 @@ import { authService } from '../services/authService';
 interface ForgotPasswordPageProps {
   onNavigateLogin: () => void;
   onNavigateHome: () => void;
+  onNavigateTerms?: () => void;
+  onNavigatePrivacy?: () => void;
 }
 
 export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
   onNavigateLogin,
   onNavigateHome,
+  onNavigateTerms,
+  onNavigatePrivacy,
 }) => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +65,8 @@ export const ForgotPasswordPage: React.FC<ForgotPasswordPageProps> = ({
       footerActionText="Log in"
       onFooterAction={onNavigateLogin}
       onNavigateHome={onNavigateHome}
+      onNavigateTerms={onNavigateTerms}
+      onNavigatePrivacy={onNavigatePrivacy}
     >
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
         {error && (

@@ -363,3 +363,45 @@ test('Mock Supabase updateUser flow: success, same_password, and mismatch states
   );
 });
 
+test('Google sign-in button and separators are temporarily removed from LoginPage and SignupPage', () => {
+  const loginSrc = readFileSync(new URL('../frontend/src/pages/LoginPage.tsx', import.meta.url), 'utf8');
+  const signupSrc = readFileSync(new URL('../frontend/src/pages/SignupPage.tsx', import.meta.url), 'utf8');
+
+  // Verify GoogleAuthButton is not actively rendered in JSX
+  assert.doesNotMatch(loginSrc, /<GoogleAuthButton/);
+  assert.doesNotMatch(signupSrc, /<GoogleAuthButton/);
+
+  // Verify "or sign in with email" / "or sign up with email" dividers are removed
+  assert.doesNotMatch(loginSrc, /or sign in with email/i);
+  assert.doesNotMatch(signupSrc, /or sign up with email/i);
+
+  // Verify clear comments indicating Google sign-in is intentionally hidden
+  assert.match(loginSrc, /Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase/i);
+  assert.match(signupSrc, /Google sign-in is intentionally hidden until Google OAuth credentials are configured in Supabase/i);
+
+  // Verify email & password form fields and actions are preserved
+  assert.match(loginSrc, /id="login-email"/);
+  assert.match(loginSrc, /id="login-password"/);
+  assert.match(loginSrc, /onNavigateForgotPassword/);
+  assert.match(signupSrc, /id="signup-email"/);
+  assert.match(signupSrc, /id="signup-password"/);
+});
+
+test('Policy page does not display visible Version: draft-1 badge but preserves version tracking', () => {
+  const policyPageSrc = readFileSync(new URL('../frontend/src/pages/PolicyAcceptancePage.tsx', import.meta.url), 'utf8');
+  const policyCssSrc = readFileSync(new URL('../frontend/src/components/policy/policy.css', import.meta.url), 'utf8');
+
+  // Verify version badge element is removed from UI
+  assert.doesNotMatch(policyPageSrc, /policy-badge/);
+  assert.doesNotMatch(policyPageSrc, /Version:\s*\{/i);
+
+  // Verify unused policy-badge class removed from css
+  assert.doesNotMatch(policyCssSrc, /\.policy-badge\s*\{/);
+
+  // Verify policy title and actions are preserved
+  assert.match(policyPageSrc, /ACTIVE_POLICY\.title/);
+  assert.match(policyPageSrc, /Accept and Continue/i);
+  assert.match(policyPageSrc, /Decline and Exit/i);
+});
+
+

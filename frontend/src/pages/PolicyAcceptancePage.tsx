@@ -88,10 +88,7 @@ export const PolicyAcceptancePage: React.FC<PolicyAcceptancePageProps> = ({ onCo
               <div style={{ marginBottom: '12px' }}>
                 <RolePilotLogo variant="compact" height={32} />
               </div>
-              <div className="policy-header-row">
-                <h1 className="policy-title">{ACTIVE_POLICY.title}</h1>
-                <span className="policy-badge">Version: {ACTIVE_POLICY.version}</span>
-              </div>
+              <h1 className="policy-title">{ACTIVE_POLICY.title}</h1>
               <p className="policy-subtitle">{ACTIVE_POLICY.subtitle}</p>
             </div>
 
@@ -114,6 +111,7 @@ export const PolicyAcceptancePage: React.FC<PolicyAcceptancePageProps> = ({ onCo
                 <button
                   type="button"
                   onClick={handleAccept}
+                  disabled={isSubmitting}
                   style={{
                     backgroundColor: '#DC2626',
                     color: '#fff',
@@ -121,10 +119,11 @@ export const PolicyAcceptancePage: React.FC<PolicyAcceptancePageProps> = ({ onCo
                     borderRadius: '6px',
                     padding: '4px 10px',
                     fontSize: '0.75rem',
-                    cursor: 'pointer',
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                    opacity: isSubmitting ? 0.7 : 1,
                   }}
                 >
-                  Retry
+                  {isSubmitting ? 'Retrying...' : 'Retry'}
                 </button>
               </div>
             )}
@@ -156,7 +155,25 @@ export const PolicyAcceptancePage: React.FC<PolicyAcceptancePageProps> = ({ onCo
                 </div>
               ))}
               <div className="policy-disclaimer">
-                Note: This placeholder draft sets forth terms governing automated application dispatch, candidate representation, and system boundaries. Acceptance records your verified consent timestamp and policy version in the audit log.
+                By clicking Accept and Continue, you acknowledge and agree to RolePilot&apos;s{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#0A66C2', fontWeight: 600, textDecoration: 'underline' }}
+                >
+                  Terms of Use
+                </a>{' '}
+                and{' '}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#0A66C2', fontWeight: 600, textDecoration: 'underline' }}
+                >
+                  Privacy Policy
+                </a>
+                . Acceptance records your verified consent timestamp and policy audit version in accordance with platform governance.
               </div>
             </div>
 

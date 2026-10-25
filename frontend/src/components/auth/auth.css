@@ -1220,6 +1220,235 @@ html {
   font-size: 0.8rem;
 }
 
+/* --------------------------------------------------------------------------
+   Landing Sections Shared Container & Platforms
+   -------------------------------------------------------------------------- */
+.landing-card-section {
+  max-width: 1140px;
+  width: calc(100% - 48px);
+  margin: 36px auto;
+  padding: 44px 40px;
+  background-color: #FFFFFF;
+  border: 1px solid var(--auth-border);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px -2px rgba(16, 26, 58, 0.05);
+  box-sizing: border-box;
+}
+
+.landing-hero-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-top: 32px;
+}
+
+.landing-platforms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.landing-platform-box {
+  background-color: #FAFCFE;
+  border: 1px solid var(--auth-border);
+  border-radius: 12px;
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.landing-platform-box.active {
+  background-color: #FFFFFF;
+  border-color: var(--auth-blue-border);
+  box-shadow: 0 4px 16px -2px rgba(23, 105, 232, 0.1);
+}
+
+.landing-platform-box:hover {
+  transform: translateY(-2px);
+  border-color: var(--auth-blue-border);
+}
+
+.landing-platform-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.landing-platform-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--auth-text-main);
+}
+
+.landing-platform-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 9999px;
+}
+
+.landing-platform-badge.available {
+  background-color: #DCFCE7;
+  color: #15803D;
+  border: 1px solid #BBF7D0;
+}
+
+.landing-platform-badge.coming-soon {
+  background-color: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+}
+
+.landing-platform-desc {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--auth-text-muted);
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Informational, Legal & Support Pages
+   -------------------------------------------------------------------------- */
+.info-page-container {
+  max-width: 960px;
+  width: 100%;
+  margin: 40px auto 60px;
+  padding: 0 20px;
+  box-sizing: border-box;
+}
+
+.info-card {
+  background-color: #FFFFFF;
+  border: 1px solid var(--auth-border);
+  border-radius: 16px;
+  padding: 44px 48px;
+  box-shadow: 0 4px 24px -2px rgba(16, 26, 58, 0.05);
+}
+
+.info-header {
+  border-bottom: 1px solid var(--auth-border);
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+}
+
+.info-title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--auth-text-main);
+  letter-spacing: -0.8px;
+  line-height: 1.25;
+  margin: 12px 0 16px;
+}
+
+.info-subtitle {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--auth-text-muted);
+  margin: 0;
+}
+
+.info-section {
+  margin-bottom: 36px;
+}
+
+.info-section:last-child {
+  margin-bottom: 0;
+}
+
+.info-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.info-section-heading h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--auth-text-main);
+  margin: 0;
+}
+
+.info-section p {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #334155;
+  margin: 0 0 14px;
+}
+
+.info-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.info-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.925rem;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.info-disclaimer-box {
+  background-color: #F8FAFC;
+  border-left: 4px solid var(--auth-blue);
+  border-radius: 0 8px 8px 0;
+  padding: 16px 20px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.info-disclaimer-box p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.info-warning-box {
+  background-color: #FFFBEB;
+  border-left: 4px solid #D97706;
+  border-radius: 0 8px 8px 0;
+  padding: 16px 20px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-warning-box p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #92400E;
+}
+
+@media (max-width: 768px) {
+  .landing-card-section {
+    width: calc(100% - 24px);
+    margin: 20px auto;
+    padding: 28px 18px;
+    border-radius: 12px;
+  }
+  .info-card {
+    padding: 28px 20px;
+    border-radius: 12px;
+  }
+  .info-title {
+    font-size: 1.75rem;
+  }
+}
+
 /* Landing Footer */
 .landing-footer {
   width: 100%;
@@ -1841,6 +2070,86 @@ html {
   .onboarding-topbar-inner {
     padding: 0 16px;
   }
+}
+
+/* ==========================================================================
+   Landing FAQ Accordion Section
+   ========================================================================== */
+.landing-faq-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 860px;
+  margin: 32px auto 0;
+  width: 100%;
+}
+
+.landing-faq-item {
+  border: 1px solid var(--auth-border);
+  border-radius: 12px;
+  background-color: #FAFCFE;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.landing-faq-item.open {
+  border-color: var(--auth-blue-border);
+  background-color: #FFFFFF;
+  box-shadow: 0 4px 16px -2px rgba(23, 105, 232, 0.08);
+}
+
+.landing-faq-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.landing-faq-trigger:hover {
+  background-color: rgba(23, 105, 232, 0.03);
+}
+
+.landing-faq-trigger:focus-visible {
+  outline: 2px solid var(--auth-blue);
+  outline-offset: -2px;
+}
+
+.landing-faq-question {
+  font-size: 1.025rem;
+  font-weight: 700;
+  color: var(--auth-text-main);
+  margin: 0;
+  line-height: 1.4;
+  padding-right: 16px;
+}
+
+.landing-faq-icon {
+  color: var(--auth-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.landing-faq-item.open .landing-faq-icon {
+  transform: rotate(180deg);
+}
+
+.landing-faq-answer {
+  padding: 0 22px 20px;
+  color: #334155;
+  font-size: 0.925rem;
+  line-height: 1.6;
+  border-top: 1px solid #F1F5F9;
+  padding-top: 14px;
 }
 
 
