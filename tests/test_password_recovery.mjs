@@ -6,6 +6,7 @@ import {
   getPasswordRecoveryLinkError,
   parseRecoveryLinkParams,
   resolvePasswordRecoveryState,
+  mapPasswordUpdateError,
 } from '../frontend/src/services/passwordRecoveryFlow.ts';
 
 import { resolvePostAuthRoute } from '../frontend/src/utils/postAuthRoute.ts';
@@ -233,3 +234,132 @@ test('Vercel routes API and health requests before the SPA fallback', () => {
     assert.deepEqual(config.rewrites.at(-1), { source: '/(.*)', destination: '/index.html' });
   }
 });
+
+test('mapPasswordUpdateError: same_password error displays explicit instruction to choose another password', () => {
+  // Case 1: code is same_password
+  const errWithCode = mapPasswordUpdateError({
+    code: 'same_password',
+    message: 'New password should be different from the old password.',
+  });
+  assert.equal(
+    errWithCode,
+    'Your new password must be different from your current password. Please choose another password.',
+  );
+
+  // Case 2: message contains text without explicit code
+  const errWithMessageOnly = mapPasswordUpdateError({
+    message: 'New password should be different from the old password.',
+  });
+  assert.equal(
+    errWithMessageOnly,
+    'Your new password must be different from your current password. Please choose another password.',
+  );
+
+  // Case 3: string error
+  const errString = mapPasswordUpdateError('same_password: New password should be different from the old password.');
+  assert.equal(
+    errString,
+    'Your new password must be different from your current password. Please choose another password.',
+  );
+});
+
+test('mapPasswordUpdateError: expired or invalid recovery session displays expired-link message only when truly expired', () => {
+  const expiredCode = mapPasswordUpdateError({
+    code: 'session_expired',
+    message: 'Auth session missing or expired.',
+  });
+  assert.equal(
+    expiredCode,
+    'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.',
+  );
+
+  const otpExpired = mapPasswordUpdateError({
+    code: 'otp_expired',
+    message: 'Token has expired.',
+  });
+  assert.equal(
+    otpExpired,
+    'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.',
+  );
+
+  // Crucial requirement: other errors (like same_password) MUST NOT display the expired link message!
+  const samePw = mapPasswordUpdateError({
+    code: 'same_password',
+    message: 'New password should be different from the old password.',
+  });
+  assert.doesNotMatch(samePw, /link is missing, invalid, or expired/i);
+});
+
+test('mapPasswordUpdateError: handles other Supabase update failures safely without leaking secrets', () => {
+  // Weak password
+  const weakErr = mapPasswordUpdateError({
+    code: 'weak_password',
+    message: 'Password must be at least 8 characters.',
+  });
+  assert.equal(weakErr, 'Password must be at least 8 characters long.');
+
+  // Rate limit
+  const rateLimitErr = mapPasswordUpdateError({
+    code: 'over_request_rate_limit',
+    message: 'For security purposes, you can only request this once every 60 seconds.',
+  });
+  assert.equal(rateLimitErr, 'Too many password update attempts. Please wait a moment and try again.');
+
+  // Generic internal server error
+  const serverErr = mapPasswordUpdateError({
+    code: 'unexpected_failure',
+    message: 'Internal DB transaction failed with connection id 12345 secret_key_abc',
+  });
+  assert.equal(serverErr, 'Unable to update your password right now. Please try again.');
+  assert.doesNotMatch(serverErr, /secret_key_abc|transaction/i);
+
+  // Null or undefined
+  assert.equal(mapPasswordUpdateError(null), 'Unable to update your password right now. Please try again.');
+});
+
+test('Mock Supabase updateUser flow: success, same_password, and mismatch states', async () => {
+  // Mock client simulation
+  function mockUpdatePassword(newPassword, currentPassword, hasSession) {
+    if (!hasSession) {
+      return {
+        success: false,
+        error: mapPasswordUpdateError({ code: 'session_expired', message: 'No session' }),
+      };
+    }
+    if (newPassword === currentPassword) {
+      return {
+        success: false,
+        error: mapPasswordUpdateError({
+          code: 'same_password',
+          message: 'New password should be different from the old password.',
+        }),
+      };
+    }
+    return {
+      success: true,
+      message: 'Password updated successfully! Redirecting to your account...',
+    };
+  }
+
+  // 1. Success case
+  const successRes = mockUpdatePassword('brandNewPassword123!', 'oldPassword123!', true);
+  assert.equal(successRes.success, true);
+  assert.match(successRes.message, /Password updated successfully/i);
+
+  // 2. same_password case
+  const samePwRes = mockUpdatePassword('currentPassword123!', 'currentPassword123!', true);
+  assert.equal(samePwRes.success, false);
+  assert.equal(
+    samePwRes.error,
+    'Your new password must be different from your current password. Please choose another password.',
+  );
+
+  // 3. Expired session case
+  const expiredRes = mockUpdatePassword('brandNewPassword123!', 'oldPassword123!', false);
+  assert.equal(expiredRes.success, false);
+  assert.equal(
+    expiredRes.error,
+    'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.',
+  );
+});
+

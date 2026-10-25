@@ -11,6 +11,7 @@
 
 import { createClient, SupabaseClient, type Session, type User } from '@supabase/supabase-js';
 import { apiClient } from '../api/client';
+import { mapPasswordUpdateError } from './passwordRecoveryFlow';
 
 // Read Vite environment variables with public defaults for production preview resilience
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || 'https://jgswscubkoevjmyorrha.supabase.co').trim();
@@ -443,7 +444,7 @@ export const authService = {
       if (sessionError || !sessionData.session) {
         return {
           success: false,
-          error: 'This password reset link is missing, invalid, or expired. Request a new reset email and open its latest link.',
+          error: mapPasswordUpdateError({ code: 'session_expired', message: 'Auth session missing or expired.' }),
         };
       }
 
@@ -454,7 +455,7 @@ export const authService = {
       if (error) {
         return {
           success: false,
-          error: 'The password could not be updated. Your reset link may have expired; request a new one and try again.',
+          error: mapPasswordUpdateError(error),
         };
       }
 
@@ -462,10 +463,10 @@ export const authService = {
         success: true,
         message: 'Password updated successfully! Redirecting to your account...',
       };
-    } catch {
+    } catch (err: unknown) {
       return {
         success: false,
-        error: 'The password could not be updated. Your reset link may have expired; request a new one and try again.',
+        error: mapPasswordUpdateError(err as import('./passwordRecoveryFlow').SupabaseAuthErrorLike),
       };
     }
   },
