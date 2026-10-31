@@ -348,6 +348,37 @@ async def _is_already_applied_on_page(page) -> bool:
         return False
 
 
+async def _is_job_closed_on_page(page) -> bool:
+    """Check if the job detail pane indicates the job is closed or no longer accepting applications."""
+    try:
+        closed_selectors = [
+            "div.jobs-details-top-card__closed-badge",
+            "span.jobs-details-top-card__closed-badge",
+            "div.artdeco-inline-feedback--error",
+            "span.jobs-details__closed-text",
+        ]
+        for sel in closed_selectors:
+            elements = await page.query_selector_all(sel)
+            for el in elements:
+                text = ((await el.text_content()) or "").strip().lower()
+                if "no longer accepting" in text or "closed" in text:
+                    log.info("Job detail pane shows closed/expired status via selector %s: %r", sel, text[:60])
+                    return True
+
+        # Check body text snippet for explicit closure notice
+        raw_body = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 4000) : ''")
+        if hasattr(raw_body, "__await__"):
+            raw_body = await raw_body
+        body_snippet = str(raw_body or "")
+        if "no longer accepting applications" in body_snippet.lower() or "this job is no longer available" in body_snippet.lower():
+            log.info("Job page body contains closed/expired notice")
+            return True
+        return False
+    except Exception as e:
+        log.debug("Error checking job closed status on page: %s", e)
+        return False
+
+
 async def _click_easy_apply(page) -> bool:
     """Find and click the Easy Apply button in the job detail pane or standalone page."""
     try:
@@ -1099,6 +1130,7 @@ async def execute_single_job_playwright_apply(
         "submission_attempted": False,
         "submission_confirmed": False,
         "submission_blocked": False,
+        "retryable": False,
         "error_message": None,
     }
 
@@ -1108,30 +1140,76 @@ async def execute_single_job_playwright_apply(
         await page.goto(job_url, wait_until="domcontentloaded", timeout=25000)
         await asyncio.sleep(2)
     except Exception as e:
+        err_str = str(e)
+        is_dead_or_expired = any(
+            x in err_str for x in [
+                "net::ERR_HTTP_RESPONSE_CODE_FAILURE",
+                "net::ERR_TOO_MANY_REDIRECTS",
+                "HTTP ERROR 429",
+                "net::ERR_NAME_NOT_RESOLVED",
+            ]
+        )
+        if is_dead_or_expired:
+            first_line = err_str.splitlines()[0] if err_str else "Network failure"
+            log_evt("JOB_EXPIRED", f"Job '{job_title}' is unavailable or expired on LinkedIn: {first_line}", "warning", {"job_id": job_id, "url": job_url, "failure_category": "EXPIRED_LISTING"})
+            telemetry["error_message"] = f"Job listing is closed or unavailable ({first_line})"
+            telemetry["failure_category"] = "EXPIRED_LISTING"
+            telemetry["is_expired"] = True
+            telemetry["skipped"] = True
+            telemetry["retryable"] = False
+            return telemetry
+
         log_evt("JOB_PAGE_ERROR", f"Failed to load job page: {str(e)}", "error", {"job_id": job_id, "error": str(e)})
         telemetry["error_message"] = f"Failed to load job page: {str(e)}"
+        telemetry["retryable"] = True
+        return telemetry
+
+    current_url = page.url or ""
+    if "trk=expired_jd_redirect" in current_url:
+        log_evt("JOB_EXPIRED", f"Job '{job_title}' redirected to expired JD tracking page.", "warning", {"job_id": job_id, "url": current_url, "failure_category": "EXPIRED_LISTING"})
+        telemetry["error_message"] = "Job listing is closed or no longer accepting applications (redirected)"
+        telemetry["failure_category"] = "EXPIRED_LISTING"
+        telemetry["is_expired"] = True
+        telemetry["skipped"] = True
+        telemetry["retryable"] = False
         return telemetry
 
     # Check for security challenge / checkpoint / login redirect
-    current_url = page.url or ""
     if any(x in current_url for x in ["/checkpoint", "/challenge", "/security-check"]):
         log_evt("SECURITY_CHALLENGE_DETECTED", "LinkedIn security verification / checkpoint detected. Halting automation.", "error", {"job_id": job_id, "url": current_url})
         telemetry["error_message"] = "Security challenge detected on job page"
+        telemetry["failure_category"] = "SECURITY_CHECKPOINT"
+        telemetry["retryable"] = False
         return telemetry
 
     if any(x in current_url for x in ["/login", "/authwall", "/uas/login"]):
-        log_evt("AUTH_REQUIRED", "Redirected to login/authwall while accessing job page.", "error", {"job_id": job_id, "url": current_url})
+        log_evt("AUTH_REQUIRED", "Redirected to login/authwall while accessing job page.", "error", {"job_id": job_id, "url": current_url, "failure_category": "AUTH_REQUIRED"})
         telemetry["error_message"] = "Authentication required on job page"
+        telemetry["failure_category"] = "AUTH_REQUIRED"
+        telemetry["retryable"] = False
         return telemetry
 
-    # 2. Check if already applied
-    if await _is_already_applied_on_page(page):
-        log_evt("JOB_SKIPPED", f"Job '{job_title}' is already applied on LinkedIn.", "warning", {"job_id": job_id, "reason": "already_applied"})
-        telemetry["error_message"] = "Already applied on LinkedIn"
+    # 2. Check if job is expired or no longer accepting applications
+    if await _is_job_closed_on_page(page):
+        log_evt("JOB_EXPIRED", f"Job '{job_title}' is closed or no longer accepting applications on LinkedIn.", "warning", {"job_id": job_id, "url": job_url, "failure_category": "EXPIRED_LISTING"})
+        telemetry["error_message"] = "Job listing is closed or no longer accepting applications"
+        telemetry["failure_category"] = "EXPIRED_LISTING"
+        telemetry["is_expired"] = True
         telemetry["skipped"] = True
+        telemetry["retryable"] = False
         return telemetry
 
-    # 3. Detect and click Easy Apply button
+    # 3. Check if already applied
+    if await _is_already_applied_on_page(page):
+        log_evt("JOB_SKIPPED", f"Job '{job_title}' is already applied on LinkedIn.", "warning", {"job_id": job_id, "reason": "already_applied", "failure_category": "ALREADY_APPLIED"})
+        telemetry["error_message"] = "Already applied on LinkedIn"
+        telemetry["failure_category"] = "ALREADY_APPLIED"
+        telemetry["already_applied"] = True
+        telemetry["skipped"] = True
+        telemetry["retryable"] = False
+        return telemetry
+
+    # 4. Detect and click Easy Apply button
     clicked = False
     for attempt in range(12):
         if await _click_easy_apply(page):
@@ -1140,8 +1218,9 @@ async def execute_single_job_playwright_apply(
         await asyncio.sleep(1.0)
 
     if not clicked:
-        log_evt("EASY_APPLY_NOT_AVAILABLE", f"Easy Apply is not available for '{job_title}'. Skipping.", "info", {"job_id": job_id, "url": job_url})
-        telemetry["error_message"] = "Easy Apply button not available"
+        log_evt("EASY_APPLY_NOT_AVAILABLE", f"Easy Apply is not available for '{job_title}' (external application). Skipping.", "info", {"job_id": job_id, "url": job_url, "failure_category": "NO_EASY_APPLY"})
+        telemetry["error_message"] = "Easy Apply button not available (external application flow)"
+        telemetry["failure_category"] = "NO_EASY_APPLY"
         telemetry["skipped"] = True
         return telemetry
 

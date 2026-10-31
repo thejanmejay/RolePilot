@@ -24,6 +24,7 @@ interface ApplicationsPageProps {
   onClearInitialApplication?: () => void;
   onNavigateToJobs?: () => void;
   onNavigateToRun?: (runId: string) => void;
+  isActive?: boolean;
 }
 
 export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({
@@ -64,10 +65,13 @@ export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({
 
       // Keep or update selected application on desktop
       if (appsData.length > 0) {
+        const isMobileScreen = typeof window !== 'undefined' && window.innerWidth <= 768;
         setSelectedApplication((prev) => {
-          if (!prev) return appsData[0];
-          const found = appsData.find((a) => a.id === prev.id);
-          return found || appsData[0];
+          if (prev) {
+            const found = appsData.find((a) => a.id === prev.id);
+            return found || appsData[0];
+          }
+          return isMobileScreen ? null : appsData[0];
         });
       } else {
         setSelectedApplication(null);

@@ -18,6 +18,7 @@ This guide covers the staging and production deployment procedures for RolePilot
 | `SUPABASE_JWT_SECRET` | Render API & Worker | Secret used to verify candidate Bearer JWTs. |
 | `ENVIRONMENT` | Render API & Worker | Set to `production` or `staging`. When `production`, missing or short encryption keys fail startup immediately. |
 | `FRONTEND_ORIGIN` | Render API & Worker | Production frontend URL (`https://rolepilot-frontend-phi.vercel.app`). |
+| `PLAYWRIGHT_BROWSERS_PATH` | Render API & Worker | **Strict Requirement on Render**: Set to `0` so Playwright installs Chromium hermetically inside `.venv/lib/.../site-packages` (which survives Render container deployment), rather than `/opt/render/.cache` (which is discarded). |
 
 ---
 
@@ -43,21 +44,24 @@ The repository includes [`render.yaml`](file:///Users/janamjay/linkedin/render.y
    - **`rolepilot-api`** (Web Service): Starts `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`.
    - **`rolepilot-queue-worker`** (Background Worker): Starts `python -m backend.app.workers.queue_worker`.
 4. Enter the required secrets (`SESSION_ENCRYPTION_KEY`, `DATABASE_URL`, `SUPABASE_*`).
+5. `PLAYWRIGHT_BROWSERS_PATH=0` is automatically pre-configured.
 
 ### Option B: Manual Service Configuration in Render Dashboard
 
 #### Web Service (`rolepilot-api`)
 - **Environment:** Python
-- **Build Command:** `./scripts/render_build.sh` *(Installs dependencies and `playwright install --with-deps chromium`)*
+- **Build Command:** `./scripts/render_build.sh` *(Or: `export PLAYWRIGHT_BROWSERS_PATH=0 && python -m pip install -r requirements.txt && python -m pip install -e . "uvicorn[standard]" && python -m playwright install --with-deps chromium`)*
 - **Start Command:** `uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT`
 - **Plan:** Starter (minimum 512MB RAM)
 - **Health Check Path:** `/health`
+- **Environment Variables:** Add `PLAYWRIGHT_BROWSERS_PATH` = `0`.
 
 #### Worker Service (`rolepilot-queue-worker`)
 - **Environment:** Python (Background Worker)
-- **Build Command:** `./scripts/render_build.sh`
+- **Build Command:** `./scripts/render_build.sh` *(Or: `export PLAYWRIGHT_BROWSERS_PATH=0 && python -m pip install -r requirements.txt && python -m pip install -e . "uvicorn[standard]" && python -m playwright install --with-deps chromium`)*
 - **Start Command:** `python -m backend.app.workers.queue_worker`
 - **Plan:** Starter (minimum 512MB RAM)
+- **Environment Variables:** Add `PLAYWRIGHT_BROWSERS_PATH` = `0`.
 
 ---
 

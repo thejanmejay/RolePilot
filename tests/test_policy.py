@@ -40,6 +40,22 @@ def test_unaccepted_user_gets_403_on_protected_endpoints():
         assert "policy" in response.json()["detail"].lower()
 
 
+def test_policy_required_header_is_exposed_to_browser_clients():
+    """The extension needs to read the policy-specific 403 signal from Fetch."""
+    token = create_test_token(USER_UNACCEPTED_ID)
+    response = client.get(
+        "/api/v1/profile",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Origin": "http://localhost:3000",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.headers.get("x-policy-required") == "true"
+    assert "x-policy-required" in response.headers.get("access-control-expose-headers", "").lower()
+
+
 def test_policy_status_returns_has_accepted_false_for_unaccepted_user():
     """Status endpoint must report has_accepted: False for unaccepted user."""
     unaccepted_token = create_test_token(USER_UNACCEPTED_ID)

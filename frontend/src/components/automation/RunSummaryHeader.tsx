@@ -1,49 +1,54 @@
 import React from 'react';
 import {
   Clock,
-  Calendar,
   Ban,
   Copy,
   Check,
   Loader2,
+  AlertCircle,
+  RotateCw,
+  Search,
+  FileText,
+  FastForward,
+  AlertTriangle,
+  Send,
+  CheckCircle2,
+  MoreHorizontal,
 } from 'lucide-react';
 import type { AutomationRun } from '../../types/automation';
 import { StatusBadge } from '../common/StatusBadge';
+import { formatRunDuration, normalizeRunStatus } from '../../utils/status';
+import { formatDate, formatTime } from '../../utils/dates';
+import { getRunTitle } from './AutomationRunCard';
 
 interface RunSummaryHeaderProps {
   run: AutomationRun;
   isCancelling?: boolean;
   onCancelRun?: () => void;
+  onReRun?: (run: AutomationRun) => void;
 }
 
 export const RunSummaryHeader: React.FC<RunSummaryHeaderProps> = ({
   run,
   isCancelling = false,
   onCancelRun,
+  onReRun,
 }) => {
   const [copied, setCopied] = React.useState(false);
-  const [now] = React.useState(() => Date.now());
 
-  const isRunning = run.status === 'running' || run.status === 'queued';
+  const normStatus = normalizeRunStatus(run.status);
+  const isRunning = normStatus === 'running';
+  const isQueued = normStatus === 'queued';
   const isDryRun = Boolean(run.dry_run);
 
-  // Compute duration
-  let durationStr = 'In progress...';
-  if (run.started_at && run.completed_at) {
-    const diffMs = new Date(run.completed_at).getTime() - new Date(run.started_at).getTime();
-    if (diffMs > 0) {
-      const mins = Math.floor(diffMs / 60000);
-      const secs = Math.floor((diffMs % 60000) / 1000);
-      durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-    } else {
-      durationStr = '< 1s';
-    }
-  } else if (run.started_at && isRunning) {
-    const diffMs = now - new Date(run.started_at).getTime();
-    const mins = Math.floor(diffMs / 60000);
-    const secs = Math.floor((diffMs % 60000) / 1000);
-    durationStr = mins > 0 ? `${mins}m ${secs}s (running)` : `${secs}s (running)`;
-  }
+  // Authoritative duration from start and completion timestamps
+  const durationStr = formatRunDuration(run.started_at, run.completed_at, run.status, run.created_at);
+
+  const formattedDate = run.created_at
+    ? `${formatDate(run.created_at)}, ${formatTime(run.created_at)}`
+    : 'Recently';
+
+  const runTitle = getRunTitle(run);
 
   // Copy UUID
   const handleCopyId = () => {
@@ -52,212 +57,331 @@ export const RunSummaryHeader: React.FC<RunSummaryHeaderProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Truthful narrative summary calculation
-  const hasFailures = (run.applications_failed || 0) > 0 || Boolean(run.error_message);
   const jobsFound = run.jobs_found || 0;
-  const jobsProcessed = run.jobs_processed || 0;
-  const submitted = run.applications_submitted || 0;
+  const jobsEvaluated = run.jobs_processed || 0;
+  // Dry runs strictly report 0 applications submitted
+  const submitted = isDryRun ? 0 : (run.applications_submitted || 0);
   const failed = run.applications_failed || 0;
   const skipped = run.applications_skipped || 0;
 
-  let narrativeStatus = {
-    title: 'Completed Successfully',
-    text: `${jobsProcessed} ${jobsProcessed === 1 ? 'job' : 'jobs'} processed · ${
-      isDryRun ? `${jobsProcessed} verified in dry run` : `${submitted} submitted`
-    } · ${skipped} skipped · ${failed} failed`,
-    type: 'success',
+  // Outcome banner state matching authoritative run status
+  let outcomeBanner = {
+    title: isDryRun ? 'Run completed successfully (Dry Run)' : 'Run completed successfully (Live Run)',
+    subtext: `${jobsFound} jobs found • ${jobsEvaluated} evaluated • ${skipped} skipped • ${failed} failed • ${submitted} submitted`,
+    bg: '#ECFDF5',
+    border: '#A7F3D0',
+    color: '#065F46',
+    icon: CheckCircle2,
+    iconColor: '#16A34A',
   };
 
-  if (run.status === 'failed') {
-    narrativeStatus = {
+  if (normStatus === 'failed') {
+    outcomeBanner = {
       title: 'Automation Execution Stopped',
-      text: run.error_message ? `Reason: ${run.error_message}` : 'Encountered unrecoverable exception during browser execution.',
-      type: 'danger',
+      subtext: run.error_message || 'Automation stopped because an error occurred.',
+      bg: '#FEF2F2',
+      border: '#FECACA',
+      color: '#991B1B',
+      icon: AlertCircle,
+      iconColor: '#DC2626',
     };
-  } else if (run.status === 'cancelled') {
-    narrativeStatus = {
+  } else if (normStatus === 'cancelled') {
+    outcomeBanner = {
       title: 'Run Cancelled by User',
-      text: 'Execution aborted before completion.',
-      type: 'warning',
+      subtext: 'Execution aborted before completion.',
+      bg: '#FFFBEB',
+      border: '#FDE68A',
+      color: '#92400E',
+      icon: Ban,
+      iconColor: '#D97706',
     };
   } else if (isRunning) {
-    narrativeStatus = {
+    outcomeBanner = {
       title: 'Automation Running in Background',
-      text: `${jobsFound} jobs found so far · Processing through Playwright browser worker...`,
-      type: 'info',
+      subtext: 'Automation is running. Results will update as processing continues.',
+      bg: '#EFF6FF',
+      border: '#BFDBFE',
+      color: '#1E40AF',
+      icon: Loader2,
+      iconColor: '#1769C2',
     };
-  } else if (hasFailures) {
-    narrativeStatus = {
-      title: 'Completed with Issues',
-      text: `${jobsProcessed} jobs processed · ${submitted} submitted · ${failed} failed · ${skipped} skipped`,
-      type: 'warning',
+  } else if (isQueued) {
+    outcomeBanner = {
+      title: 'Run Queued',
+      subtext: 'Your run is queued and waiting to start.',
+      bg: '#FFFBEB',
+      border: '#FDE68A',
+      color: '#92400E',
+      icon: Clock,
+      iconColor: '#D97706',
     };
   }
 
-  return (
-    <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
-      {/* Top Meta Bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <StatusBadge status={run.status} type="run" />
+  const OutcomeIcon = outcomeBanner.icon;
 
-            <span
+  const resultMetricCards = [
+    {
+      label: 'Jobs Found',
+      value: jobsFound,
+      icon: Search,
+      iconColor: '#1769C2',
+      subtext: 'Matches from your search criteria and location preferences.',
+    },
+    {
+      label: 'Evaluated',
+      value: jobsEvaluated,
+      icon: FileText,
+      iconColor: '#1769C2',
+      subtext: 'Matched your profile and role criteria.',
+    },
+    {
+      label: 'Skipped',
+      value: skipped,
+      icon: FastForward,
+      iconColor: '#D97706',
+      subtext: 'Did not meet criteria',
+    },
+    {
+      label: 'Failed',
+      value: failed,
+      icon: AlertTriangle,
+      iconColor: '#DC2626',
+      subtext: 'Errors during processing',
+    },
+    {
+      label: 'Submitted',
+      value: submitted,
+      icon: Send,
+      iconColor: '#16A34A',
+      subtext: isDryRun ? 'No applications submitted (Dry Run).' : 'Applications submitted live.',
+    },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '8px' }}>
+      {/* Top Header Bar: Title, StatusBadge, Action Buttons */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
+            <h2 style={{ fontSize: '1.28rem', fontWeight: 800, color: '#0F172A', margin: 0, letterSpacing: '-0.01em' }}>
+              Run Details
+            </h2>
+            <StatusBadge status={run.status} type="run" />
+          </div>
+
+          <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0F172A', margin: '4px 0 2px 0', letterSpacing: '-0.01em' }}>
+            {runTitle}
+          </h3>
+
+          <div style={{ fontSize: '0.8rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span>Run #{run.id.slice(0, 8)}</span>
+            <span>•</span>
+            <span>{formattedDate}</span>
+            <span style={{ color: '#CBD5E1' }}>|</span>
+            <span style={{ fontWeight: 600, color: isDryRun ? '#1769C2' : '#B45309' }}>
+              {isDryRun ? 'Dry Run' : 'Live Run'}
+            </span>
+            <span style={{ color: '#CBD5E1' }}>|</span>
+            <span>Duration: <strong>{durationStr}</strong></span>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {onReRun && (
+            <button
+              onClick={() => onReRun(run)}
+              className="btn btn-outline"
               style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                padding: '3px 8px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: isDryRun ? 'var(--primary-light)' : '#fef3c7',
-                color: isDryRun ? 'var(--primary)' : '#b45309',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                borderRadius: '8px',
+                border: '1px solid #E2E8F0',
+                backgroundColor: '#FFFFFF',
+                color: '#0F172A',
+                cursor: 'pointer',
               }}
             >
-              {isDryRun ? 'Dry Run • Safe' : 'Live Submission'}
-            </span>
-
-            {isRunning && (
-              <span style={{ fontSize: '0.75rem', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                <Loader2 size={13} className="spin-animation" />
-                <span>Active Worker</span>
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
-              Run #{run.id.slice(0, 8)}
-            </h2>
-            <button
-              onClick={handleCopyId}
-              className="btn-icon"
-              title="Copy Full UUID"
-              style={{ width: '28px', height: '28px', padding: 0 }}
-            >
-              {copied ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+              <RotateCw size={14} />
+              <span>Re-run</span>
             </button>
-          </div>
-        </div>
+          )}
 
-        {isRunning && onCancelRun && (
           <button
-            onClick={onCancelRun}
-            disabled={isCancelling}
-            className="btn btn-secondary"
+            onClick={handleCopyId}
+            className="btn btn-outline"
+            title="Copy Run ID"
             style={{
-              color: 'var(--danger)',
-              fontSize: '0.82rem',
-              padding: '8px 14px',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              minHeight: '40px',
+              padding: '6px 14px',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              borderRadius: '8px',
+              border: '1px solid #E2E8F0',
+              backgroundColor: '#FFFFFF',
+              color: '#0F172A',
+              cursor: 'pointer',
             }}
           >
-            <Ban size={15} />
-            <span>{isCancelling ? 'Cancelling...' : 'Cancel Execution'}</span>
+            {copied ? <Check size={14} color="#16A34A" /> : <Copy size={14} />}
+            <span>{copied ? 'Copied!' : 'Copy Run ID'}</span>
           </button>
-        )}
+
+          {isRunning && onCancelRun && (
+            <button
+              onClick={onCancelRun}
+              disabled={isCancelling}
+              className="btn btn-secondary"
+              style={{
+                color: '#DC2626',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                padding: '6px 12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderRadius: '8px',
+                border: '1px solid #FECACA',
+                backgroundColor: '#FEF2F2',
+                cursor: 'pointer',
+              }}
+            >
+              <Ban size={14} />
+              <span>{isCancelling ? 'Cancelling...' : 'Cancel'}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="btn-icon"
+            title="More Options"
+            style={{
+              padding: '6px',
+              borderRadius: '8px',
+              border: '1px solid #E2E8F0',
+              backgroundColor: '#FFFFFF',
+              color: '#64748B',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
       </div>
 
-      {/* Truthful Narrative Status Banner */}
+      {/* Outcome Status Banner */}
       <div
         style={{
-          padding: '12px 14px',
-          borderRadius: 'var(--radius-sm)',
-          backgroundColor:
-            narrativeStatus.type === 'success'
-              ? '#f0fdf4'
-              : narrativeStatus.type === 'danger'
-              ? '#fef2f2'
-              : narrativeStatus.type === 'warning'
-              ? '#fffbeb'
-              : '#eff6ff',
-          border: `1px solid ${
-            narrativeStatus.type === 'success'
-              ? '#bbf7d0'
-              : narrativeStatus.type === 'danger'
-              ? '#fecaca'
-              : narrativeStatus.type === 'warning'
-              ? '#fde68a'
-              : '#bfdbfe'
-          }`,
-          marginBottom: '16px',
+          padding: '12px 16px',
+          borderRadius: '10px',
+          backgroundColor: outcomeBanner.bg,
+          border: `1px solid ${outcomeBanner.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
         }}
       >
-        <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)', marginBottom: '2px' }}>
-          {narrativeStatus.title}
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          <OutcomeIcon
+            size={20}
+            color={outcomeBanner.iconColor}
+            className={isRunning ? 'spin-animation' : undefined}
+          />
         </div>
-        <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-          {narrativeStatus.text}
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '0.88rem', color: outcomeBanner.color, lineHeight: 1.3 }}>
+            {outcomeBanner.title}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '2px' }}>
+            {outcomeBanner.subtext}
+          </div>
         </div>
       </div>
 
-      {/* Metrics Row (Reflowing on small screens) */}
+      {/* Restrained Error Panel for Exceptions */}
+      {run.error_message && (
+        <div
+          style={{
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            borderRadius: '8px',
+            padding: '10px 14px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#DC2626', fontWeight: 700, fontSize: '0.8rem', marginBottom: '4px' }}>
+            <AlertCircle size={14} style={{ flexShrink: 0 }} />
+            <span>Error Summary</span>
+          </div>
+          <div
+            className="custom-scrollbar"
+            style={{
+              color: '#991B1B',
+              fontSize: '0.78rem',
+              lineHeight: 1.45,
+              wordBreak: 'break-word',
+              overflowWrap: 'anywhere',
+              whiteSpace: 'pre-wrap',
+              maxHeight: '120px',
+              overflowY: 'auto',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            }}
+          >
+            {run.error_message}
+          </div>
+        </div>
+      )}
+
+      {/* 5 Result Metric Cards Grid */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-          gap: '8px',
-          padding: '14px',
-          backgroundColor: 'var(--bg-subtle)',
-          borderRadius: 'var(--radius-md)',
-          textAlign: 'center',
-          marginBottom: '14px',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+          gap: '12px',
         }}
       >
-        <div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>
-            {jobsFound}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>DISCOVERED</div>
-        </div>
+        {resultMetricCards.map((card, idx) => {
+          const Icon = card.icon;
+          return (
+            <div
+              key={idx}
+              style={{
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '10px',
+                padding: '14px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '110px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <Icon size={16} color={card.iconColor} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>
+                  {card.value}
+                </span>
+              </div>
 
-        <div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)' }}>
-            {jobsProcessed}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>PROCESSED</div>
-        </div>
-
-        <div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#16a34a' }}>
-            {isDryRun ? jobsProcessed : submitted}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600 }}>
-            {isDryRun ? 'VERIFIED' : 'SUBMITTED'}
-          </div>
-        </div>
-
-        <div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#d97706' }}>
-            {skipped}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#d97706', fontWeight: 600 }}>SKIPPED</div>
-        </div>
-
-        <div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: failed > 0 ? '#dc2626' : 'var(--text-muted)' }}>
-            {failed}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: failed > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: 600 }}>
-            FAILED
-          </div>
-        </div>
-      </div>
-
-      {/* Timing Details Bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '16px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <Calendar size={13} />
-          <span>
-            Started: {run.created_at ? new Date(run.created_at).toLocaleString() : 'N/A'}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <Clock size={13} />
-          <span>Duration: {durationStr}</span>
-        </div>
+              <div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0F172A', marginBottom: '2px' }}>
+                  {card.label}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748B', lineHeight: 1.3 }}>
+                  {card.subtext}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

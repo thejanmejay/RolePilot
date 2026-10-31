@@ -79,11 +79,16 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [isAuthenticated, hasAcceptedPolicy]
   );
 
+  const profileLoadedRef = React.useRef(false);
+
   useEffect(() => {
     if (isAuthenticated && hasAcceptedPolicy === true) {
-      refreshProfile(false);
+      const isInitial = !profileLoadedRef.current;
+      profileLoadedRef.current = true;
+      refreshProfile(!isInitial);
     } else {
       if (!isAuthenticated || hasAcceptedPolicy === false) {
+        profileLoadedRef.current = false;
         setProfile(null);
         setResumes([]);
         setSearchConfigs([]);
@@ -96,6 +101,7 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     const handleAuthCleanup = () => {
+      profileLoadedRef.current = false;
       setProfile(null);
       setResumes([]);
       setSearchConfigs([]);

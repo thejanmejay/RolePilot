@@ -83,6 +83,10 @@ class ApplicationService:
         submitted_at = datetime.utcnow() if status in ["applied", "submitted"] else None
 
         if existing:
+            # Preservation Rule: Never overwrite an existing 'applied' or 'submitted' status with a dry run or transient failure
+            if existing.status in ["applied", "submitted"] and status not in ["applied", "submitted"]:
+                return existing
+
             existing.status = status
             existing.run_id = run_id or existing.run_id
             existing.error_message = error_message or existing.error_message

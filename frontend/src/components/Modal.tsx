@@ -19,22 +19,35 @@ export const Modal: React.FC<ModalProps> = ({
   maxWidth = '600px',
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         onClose();
       }
     };
 
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      window.addEventListener('keydown', handleKeyDown);
-    }
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Shift focus to the modal for screen-reader and keyboard accessibility
+    const timer = setTimeout(() => {
+      modalRef.current?.focus();
+    }, 50);
 
     return () => {
-      document.body.style.overflow = '';
+      clearTimeout(timer);
+      document.body.style.overflow = originalOverflow;
       window.removeEventListener('keydown', handleKeyDown);
+      if (previousFocusRef.current && typeof previousFocusRef.current.focus === 'function') {
+        previousFocusRef.current.focus();
+      }
     };
   }, [isOpen, onClose]);
 
@@ -53,15 +66,40 @@ export const Modal: React.FC<ModalProps> = ({
       <div
         className="modal-content"
         ref={modalRef}
+        tabIndex={-1}
         style={{
           maxWidth,
+          width: '100%',
+          maxHeight: 'min(90vh, 90dvh)',
           margin: 'auto',
           alignSelf: 'center',
           position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          outline: 'none',
         }}
       >
-        <div className="modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px' }}>
-          <h3 id="modal-title" style={{ fontSize: '1.18rem', fontWeight: 700, color: 'var(--text-main)', letterSpacing: '-0.01em', margin: 0 }}>
+        <div
+          className="modal-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '18px 24px',
+            borderBottom: '1px solid var(--border-light)',
+            flexShrink: 0,
+          }}
+        >
+          <h3
+            id="modal-title"
+            style={{
+              fontSize: '1.18rem',
+              fontWeight: 700,
+              color: 'var(--text-main)',
+              letterSpacing: '-0.01em',
+              margin: 0,
+            }}
+          >
             {title}
           </h3>
           <button
@@ -73,10 +111,10 @@ export const Modal: React.FC<ModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '36px',
-              height: '36px',
-              minWidth: '36px',
-              minHeight: '36px',
+              width: '40px',
+              height: '40px',
+              minWidth: '40px',
+              minHeight: '40px',
               borderRadius: '50%',
               border: '1px solid var(--border-light)',
               backgroundColor: '#f8fafc',
@@ -89,8 +127,33 @@ export const Modal: React.FC<ModalProps> = ({
             <X size={18} strokeWidth={2.2} />
           </button>
         </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div className="modal-footer">{footer}</div>}
+        <div
+          className="modal-body"
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '24px',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {children}
+        </div>
+        {footer && (
+          <div
+            className="modal-footer"
+            style={{
+              padding: '16px 24px',
+              borderTop: '1px solid var(--border-light)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              backgroundColor: '#fafafa',
+              flexShrink: 0,
+            }}
+          >
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

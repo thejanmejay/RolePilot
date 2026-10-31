@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   User,
@@ -12,56 +12,50 @@ import {
   Search,
   Bell,
   CheckCircle,
-  Shield,
-  Database,
   ChevronDown,
-  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../Modal';
 import { RolePilotLogo } from '../common/RolePilotLogo';
-import { authService } from '../../services/authService';
-import { formatErrorMessage } from '../../api/client';
+import { useNavigate } from '../../context/NavigationContext';
+import { NotificationPanel } from '../notifications/NotificationPanel';
+import { fetchUnreadCount } from '../../api/notifications';
 
-export type TabType = 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation';
+
+export type TabType = 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation' | 'settings';
 
 interface AppLayoutProps {
   currentTab: TabType;
   onTabChange: (tab: TabType) => void;
+  onNavigate?: (path: string) => void;
   children: React.ReactNode;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
   currentTab,
   onTabChange,
+  onNavigate,
   children,
 }) => {
   const { email, isAuthenticated, logout } = useAuth();
+  const routerNavigate = useNavigate();
+  const doNavigate = onNavigate || routerNavigate;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState('');
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const handleDeleteAccount = async () => {
-    if (deleteConfirmation !== 'DELETE' || isDeletingAccount) return;
-    setIsDeletingAccount(true);
-    setDeleteAccountError(null);
-    try {
-      await authService.deleteAccount();
-      await logout();
-      setIsDeleteAccountOpen(false);
-      setIsSettingsOpen(false);
-      window.history.pushState(null, '', '/');
-      window.dispatchEvent(new PopStateEvent('popstate'));
-    } catch (error) {
-      setDeleteAccountError(formatErrorMessage(error));
-    } finally {
-      setIsDeletingAccount(false);
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchUnreadCount().then(setUnreadCount).catch(() => {});
+      const interval = setInterval(() => {
+        fetchUnreadCount().then(setUnreadCount).catch(() => {});
+      }, 30000);
+      return () => clearInterval(interval);
     }
-  };
+  }, [isAuthenticated]);
+
 
   const navItems = [
     { id: 'dashboard' as TabType, label: 'Dashboard', icon: LayoutDashboard },
@@ -96,11 +90,18 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         {/* Brand Header */}
         <div className="sidebar-brand">
           <div
-            onClick={() => handleTabClick('dashboard')}
+            onClick={() => {
+              if (currentTab === 'dashboard') {
+                doNavigate('/');
+              } else {
+                handleTabClick('dashboard');
+              }
+            }}
             style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-            aria-label="RolePilot Dashboard"
+            title="Click to visit RolePilot Home"
+            aria-label="RolePilot Home"
           >
-            <RolePilotLogo variant="compact" height={36} alt="RolePilot — Your Career. Your Next Move." />
+            <RolePilotLogo variant="compact" height={36} whiteText alt="RolePilot — Your Career. Your Next Move." />
           </div>
 
           {/* Mobile Close X Button */}
@@ -137,9 +138,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <button
             onClick={() => {
               setIsSettingsOpen(true);
+              onTabChange('settings');
               setIsMobileMenuOpen(false);
+              doNavigate('/settings');
             }}
-            className="sidebar-footer-btn"
+            className={`sidebar-footer-btn ${currentTab === 'settings' ? 'active' : ''}`}
+            aria-label="Settings"
           >
             <Settings size={18} />
             <span>Settings</span>
@@ -150,8 +154,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               onClick={() => {
                 logout();
                 setIsMobileMenuOpen(false);
-                window.history.pushState(null, '', '/');
-                window.dispatchEvent(new PopStateEvent('popstate'));
+                doNavigate('/');
               }}
               className="sidebar-footer-btn danger"
             >
@@ -163,6 +166,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           )}
         </div>
       </aside>
+
 
       {/* Main Content Area */}
       <div className="saas-main-wrapper">
@@ -192,22 +196,71 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
 
           {/* Top Header Right: Notification Bell & User Avatar */}
-          <div className="top-header-right">
+          <div className="top-header-right" style={{ position: 'relative' }}>
             <button
-              className="icon-action-btn notification-btn"
+              className={`icon-action-btn notification-btn ${isNotificationOpen ? 'active' : ''}`}
               title="Notifications"
               aria-label="View notifications"
+              onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+              aria-expanded={isNotificationOpen}
             >
               <Bell size={18} />
-              <span className="notification-dot" />
+              {unreadCount > 0 ? (
+                <span className="notification-badge-pill" aria-label={`${unreadCount} unread notifications`}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              ) : (
+                <span className="notification-dot" />
+              )}
             </button>
 
-            {/* User Avatar Chip */}
+            {/* Notification Flyout Panel */}
+            <NotificationPanel
+              isOpen={isNotificationOpen}
+              onClose={() => setIsNotificationOpen(false)}
+              onNotificationClick={(link) => {
+                if (link) {
+                  if (link.startsWith('/settings')) {
+                    onTabChange('settings');
+                    doNavigate('/settings');
+                  } else if (link.startsWith('/automation')) {
+                    onTabChange('automation');
+                    doNavigate('/automation');
+                  } else if (link.startsWith('/applications')) {
+                    onTabChange('applications');
+                    doNavigate('/applications');
+                  } else if (link.startsWith('/jobs')) {
+                    onTabChange('jobs');
+                    doNavigate('/jobs');
+                  } else if (link.startsWith('/profile')) {
+                    onTabChange('profile');
+                    doNavigate('/profile');
+                  } else {
+                    doNavigate(link);
+                  }
+                }
+              }}
+              onCountChange={setUnreadCount}
+            />
+
+            {/* User Avatar Chip -> User clicked right profile icon redirects to Settings */}
             <div
               className="user-avatar-chip"
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={() => {
+                onTabChange('settings');
+                doNavigate('/settings');
+              }}
               title={displayEmail}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  onTabChange('settings');
+                  doNavigate('/settings');
+                }
+              }}
               style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              aria-label="Account Settings"
             >
               <div className="avatar-circle" style={{ backgroundColor: '#8B5CF6', color: '#ffffff', fontWeight: 800 }}>
                 {userInitials}
@@ -245,14 +298,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         })}
       </nav>
 
-      {/* Settings Modal (Centered with prominent X close icon) */}
+      {/* Quick Settings & Navigation Modal (Lightweight entry point to Settings) */}
       <Modal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        title="Settings & System Status"
-        maxWidth="540px"
+        title="Quick Settings & Account"
+        maxWidth="500px"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           {/* User Session Info */}
           <div
             style={{
@@ -262,72 +315,113 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               border: '1px solid var(--border-light)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-              <div className="avatar-circle" style={{ width: '40px', height: '40px', fontSize: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="avatar-circle" style={{ width: '42px', height: '42px', fontSize: '1.05rem', backgroundColor: 'var(--primary)', color: '#ffffff', fontWeight: 800 }}>
                 {userInitials}
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
                   {email || 'Authenticated User'}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
                   <CheckCircle size={13} /> Active Supabase Session
                 </div>
               </div>
             </div>
           </div>
 
-          {/* System Services Status */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              Backend Health
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 600 }}>
-                <Database size={16} color="var(--primary)" /> Supabase PostgreSQL
-              </div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', backgroundColor: 'var(--success-bg)', padding: '3px 8px', borderRadius: 'var(--radius-full)' }}>
-                Healthy
-              </span>
-            </div>
+          {/* Primary Action: Go to Full Settings Page */}
+          <button
+            onClick={() => {
+              onTabChange('settings');
+              setIsSettingsOpen(false);
+              doNavigate('/settings');
+            }}
+            className="btn btn-primary"
+            style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '0.94rem' }}
+          >
+            <Settings size={17} />
+            <span>Open Dedicated Settings Page</span>
+          </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 600 }}>
-                <Shield size={16} color="var(--primary)" /> Automation Engine
-              </div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', backgroundColor: 'var(--success-bg)', padding: '3px 8px', borderRadius: 'var(--radius-full)' }}>
-                Ready (Triple-Key Guard Active)
-              </span>
+          {/* Quick Section Shortcuts */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Settings Sections
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              {[
+                { label: 'Profile & Identity', tab: 'settings' as TabType },
+                { label: 'Security & Password', tab: 'settings' as TabType },
+                { label: 'LinkedIn Connection', tab: 'settings' as TabType },
+                { label: 'Live System Health', tab: 'settings' as TabType },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    onTabChange(item.tab);
+                    setIsSettingsOpen(false);
+                    doNavigate('/settings');
+                  }}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem', padding: '8px 10px', justifyContent: 'flex-start', textAlign: 'left' }}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Quick Actions */}
-          {isAuthenticated && (
-            <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '16px' }}>
-              <button
-                onClick={() => {
-                  setDeleteAccountError(null);
-                  setDeleteConfirmation('');
-                  setIsDeleteAccountOpen(true);
+          {/* Legal & Support Links */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 'var(--radius-md)', backgroundColor: '#f8fafc', border: '1px solid var(--border-light)', fontSize: '0.84rem' }}>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Legal &amp; Support</span>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <a
+                href="/terms"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setIsSettingsOpen(false);
+                  doNavigate('/terms');
                 }}
-                className="btn btn-outline"
-                style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
               >
-                <AlertTriangle size={15} />
-                <span>Delete Account</span>
-              </button>
+                Terms
+              </a>
+              <span style={{ color: 'var(--text-muted)' }}>•</span>
+              <a
+                href="/privacy"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setIsSettingsOpen(false);
+                  doNavigate('/privacy');
+                }}
+                style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
+              >
+                Privacy
+              </a>
+              <span style={{ color: 'var(--text-muted)' }}>•</span>
+              <a
+                href="/support"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setIsSettingsOpen(false);
+                  doNavigate('/support');
+                }}
+                style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
+              >
+                Support
+              </a>
             </div>
-          )}
+          </div>
 
-          {/* Quick Actions */}
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
+          {/* Footer Actions */}
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-light)', paddingTop: '14px' }}>
             {isAuthenticated && (
               <button
-                onClick={() => {
-                  logout();
+                onClick={async () => {
+                  await logout();
                   setIsSettingsOpen(false);
-                  window.history.pushState(null, '', '/');
-                  window.dispatchEvent(new PopStateEvent('popstate'));
+                  doNavigate('/');
                 }}
                 className="btn btn-outline"
                 style={{ color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
@@ -338,63 +432,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             )}
             <button
               onClick={() => setIsSettingsOpen(false)}
-              className="btn btn-primary"
+              className="btn btn-secondary"
             >
-              Done
+              Close
             </button>
           </div>
         </div>
       </Modal>
 
-      <Modal
-        isOpen={isDeleteAccountOpen}
-        onClose={() => {
-          if (isDeletingAccount) return;
-          setIsDeleteAccountOpen(false);
-          setDeleteAccountError(null);
-        }}
-        title="Delete Account Permanently?"
-        maxWidth="520px"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <p style={{ margin: 0, color: 'var(--text-main)', lineHeight: 1.6 }}>
-            This permanently deletes your RolePilot profile, resumes and uploaded files, search settings,
-            applications, automation history, policy acceptance records, and account login. This action
-            cannot be undone. You can register again with this email after deletion completes.
-          </p>
-          <label htmlFor="delete-account-confirmation" style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-            Type <strong>DELETE</strong> to confirm
-          </label>
-          <input
-            id="delete-account-confirmation"
-            value={deleteConfirmation}
-            onChange={(event) => setDeleteConfirmation(event.target.value)}
-            autoComplete="off"
-            disabled={isDeletingAccount}
-            className="form-input"
-          />
-          {deleteAccountError && (
-            <p role="alert" style={{ color: 'var(--danger)', margin: 0 }}>{deleteAccountError}</p>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-            <button
-              onClick={() => setIsDeleteAccountOpen(false)}
-              disabled={isDeletingAccount}
-              className="btn btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleDeleteAccount}
-              disabled={deleteConfirmation !== 'DELETE' || isDeletingAccount}
-              className="btn btn-primary"
-              style={{ backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
-            >
-              {isDeletingAccount ? 'Deleting…' : 'Permanently Delete Account'}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

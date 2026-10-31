@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { Job, JobFilterParams, SearchConfig, SearchConfigCreate } from '../types/job';
+import type { Job, JobFilterParams, SearchConfig, SearchConfigCreate, SyncedJob } from '../types/job';
 
 export const jobsApi = {
   /**
@@ -16,6 +16,13 @@ export const jobsApi = {
     const queryString = query.toString();
     const endpoint = queryString ? `/api/v1/jobs?${queryString}` : '/api/v1/jobs';
     return apiClient.get<Job[]>(endpoint);
+  },
+
+  /**
+   * List user-owned synchronized extension jobs
+   */
+  async getSyncedJobs(skip = 0, limit = 50): Promise<SyncedJob[]> {
+    return apiClient.get<SyncedJob[]>(`/api/v1/jobs/synced?skip=${skip}&limit=${limit}`);
   },
 
   /**

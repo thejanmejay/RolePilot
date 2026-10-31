@@ -23,35 +23,39 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
     <div
       className="card"
       style={{
-        border: isDryRun ? '1px solid var(--primary-border)' : hasLiveSubmissions ? '1px solid #86efac' : '1px solid #fde68a',
-        backgroundColor: isDryRun ? '#f0f7ff' : hasLiveSubmissions ? '#f0fdf4' : '#fffbeb',
+        border: isDryRun ? '1px solid #BFDBFE' : hasLiveSubmissions ? '1px solid #BBF7D0' : '1px solid #FDE68A',
+        backgroundColor: isDryRun ? '#F0F7FF' : hasLiveSubmissions ? '#F0FDF4' : '#FFFBEB',
+        borderRadius: '12px',
         padding: '16px',
         marginBottom: '16px',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isDryRun ? (
-            <ShieldCheck size={20} color="var(--primary)" />
+            <ShieldCheck size={20} color="#1769C2" />
           ) : hasLiveSubmissions ? (
-            <KeyRound size={20} color="#16a34a" />
+            <KeyRound size={20} color="#16A34A" />
           ) : (
-            <ShieldAlert size={20} color="#d97706" />
+            <ShieldAlert size={20} color="#D97706" />
           )}
-          <span style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
+          <span style={{ fontWeight: 800, fontSize: '0.86rem', color: '#172554', letterSpacing: '0.02em' }}>
             TRIPLE-KEY SUBMISSION SAFETY
           </span>
         </div>
 
         <span
           style={{
-            fontSize: '0.72rem',
+            fontSize: '0.7rem',
             fontWeight: 800,
             textTransform: 'uppercase',
-            padding: '3px 8px',
-            borderRadius: 'var(--radius-full)',
-            backgroundColor: isDryRun ? 'var(--primary-light)' : hasLiveSubmissions ? '#dcfce7' : '#fef3c7',
-            color: isDryRun ? 'var(--primary)' : hasLiveSubmissions ? '#15803d' : '#b45309',
+            padding: '2px 8px',
+            borderRadius: '9999px',
+            backgroundColor: isDryRun ? '#DBEAFE' : hasLiveSubmissions ? '#DCFCE7' : '#FEF3C7',
+            color: isDryRun ? '#1769C2' : hasLiveSubmissions ? '#15803D' : '#B45309',
+            border: isDryRun ? '1px solid #BFDBFE' : hasLiveSubmissions ? '1px solid #BBF7D0' : '1px solid #FDE68A',
+            letterSpacing: '0.02em',
           }}
         >
           {isDryRun ? 'SUBMISSION BLOCKED • SAFE' : hasLiveSubmissions ? 'LIVE SUBMISSION VERIFIED' : 'LIVE MODE GATED'}
@@ -62,7 +66,7 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
           gap: '8px',
           marginBottom: '12px',
         }}
@@ -70,25 +74,25 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
         {/* Key 1 */}
         <div
           style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: '#FFFFFF',
             padding: '8px 10px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-light)',
+            borderRadius: '8px',
+            border: '1px solid #E5E7EB',
           }}
         >
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>
+          <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>
             Key 1: Dry Run
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700, fontSize: '0.82rem' }}>
             {key1DryRun ? (
               <>
-                <Check size={14} color="var(--primary)" />
-                <span style={{ color: 'var(--primary)' }}>ENABLED (Safe)</span>
+                <Check size={14} color="#1769C2" />
+                <span style={{ color: '#1769C2' }}>ENABLED (Safe)</span>
               </>
             ) : (
               <>
-                <Minus size={14} color="var(--text-muted)" />
-                <span style={{ color: 'var(--text-main)' }}>DISABLED</span>
+                <Minus size={14} color="#64748B" />
+                <span style={{ color: '#172554' }}>DISABLED</span>
               </>
             )}
           </div>
@@ -97,25 +101,25 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
         {/* Key 2 */}
         <div
           style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: '#FFFFFF',
             padding: '8px 10px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-light)',
+            borderRadius: '8px',
+            border: '1px solid #E5E7EB',
           }}
         >
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>
+          <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>
             Key 2: Live Submission
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700, fontSize: '0.82rem' }}>
             {key2LiveAllowed ? (
               <>
-                <Check size={14} color="#16a34a" />
-                <span style={{ color: '#16a34a' }}>AUTHORIZED</span>
+                <Check size={14} color="#16A34A" />
+                <span style={{ color: '#16A34A' }}>AUTHORIZED</span>
               </>
             ) : (
               <>
-                <X size={14} color="var(--danger)" />
-                <span style={{ color: 'var(--danger)' }}>OFF (Guarded)</span>
+                <X size={14} color="#DC2626" />
+                <span style={{ color: '#DC2626' }}>OFF (Guarded)</span>
               </>
             )}
           </div>
@@ -124,30 +128,30 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
         {/* Key 3 */}
         <div
           style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: '#FFFFFF',
             padding: '8px 10px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-light)',
+            borderRadius: '8px',
+            border: '1px solid #E5E7EB',
           }}
         >
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>
+          <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 600, marginBottom: '2px' }}>
             Key 3: Token Confirmation
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700, fontSize: '0.82rem' }}>
             {isDryRun ? (
               <>
-                <Minus size={14} color="var(--text-muted)" />
-                <span style={{ color: 'var(--text-muted)' }}>NOT REQUIRED</span>
+                <Minus size={14} color="#64748B" />
+                <span style={{ color: '#64748B' }}>NOT REQUIRED</span>
               </>
             ) : key3Confirmed ? (
               <>
-                <Check size={14} color="#16a34a" />
-                <span style={{ color: '#16a34a' }}>CONFIRMED</span>
+                <Check size={14} color="#16A34A" />
+                <span style={{ color: '#16A34A' }}>CONFIRMED</span>
               </>
             ) : (
               <>
-                <AlertTriangle size={14} color="#d97706" />
-                <span style={{ color: '#d97706' }}>PENDING</span>
+                <AlertTriangle size={14} color="#D97706" />
+                <span style={{ color: '#D97706' }}>PENDING</span>
               </>
             )}
           </div>
@@ -155,14 +159,14 @@ export const SafetyGuardPanel: React.FC<SafetyGuardPanelProps> = ({ run }) => {
       </div>
 
       {/* Explanatory Banner */}
-      <div style={{ fontSize: '0.78rem', color: isDryRun ? 'var(--primary)' : '#166534', lineHeight: 1.4 }}>
+      <div style={{ fontSize: '0.76rem', color: isDryRun ? '#1769C2' : '#166534', lineHeight: 1.45 }}>
         {isDryRun ? (
           <span>
-            <strong>Safety Interlock Active:</strong> All form steps were detected and filled using your profile heuristics, but the final submission click was strictly blocked to safeguard your LinkedIn profile.
+            <strong>Safety Interlock Active:</strong> All form steps were detected and filled using candidate profile heuristics, but the final submission click was strictly blocked to safeguard your LinkedIn profile.
           </span>
         ) : (
           <span>
-            <strong>Live Execution Confirmed:</strong> Applications were authorized for real submission with a hard safety cap of 1 job per run to avoid spam detection.
+            <strong>Live Execution Confirmed:</strong> Applications were authorized for genuine submission with a hard safety cap of 1 job per run to avoid spam detection.
           </span>
         )}
       </div>

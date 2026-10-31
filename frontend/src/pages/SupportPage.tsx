@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ArrowLeft, ArrowRight, LogIn, HelpCircle, BookOpen, Compass, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, LogIn, HelpCircle, BookOpen, Compass, ShieldCheck, MessageSquare } from 'lucide-react';
 import { RolePilotLogo } from '../components/common/RolePilotLogo';
 import { PublicFooter } from '../components/common/PublicFooter';
 import type { InfoPageNavigationProps } from './AboutPage';
@@ -15,6 +15,9 @@ export const SupportPage: React.FC<InfoPageNavigationProps> = ({
   onNavigateGuidelines,
   onNavigateSupport,
   onNavigateBlog,
+  onNavigateContact,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
   useEffect(() => {
     document.title = 'Help & Support — RolePilot';
@@ -25,14 +28,18 @@ export const SupportPage: React.FC<InfoPageNavigationProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateHome}
+            onClick={isAuthenticated && onNavigateDashboard ? onNavigateDashboard : onNavigateHome}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateHome();
+                if (isAuthenticated && onNavigateDashboard) {
+                  onNavigateDashboard();
+                } else {
+                  onNavigateHome();
+                }
               }
             }}
             aria-label="RolePilot Home"
@@ -50,22 +57,36 @@ export const SupportPage: React.FC<InfoPageNavigationProps> = ({
               <ArrowLeft size={16} />
               <span>Back to home</span>
             </button>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -159,6 +180,38 @@ export const SupportPage: React.FC<InfoPageNavigationProps> = ({
                   Read About RolePilot &rarr;
                 </a>
               </div>
+
+              <div
+                style={{
+                  padding: '20px',
+                  borderRadius: '10px',
+                  border: '1px solid #E2E8F0',
+                  backgroundColor: '#F8FAFC',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#101A3A' }}>
+                  <MessageSquare size={18} color="#0A66C2" />
+                  <span>Account Deletion &amp; Support</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748B', lineHeight: 1.5 }}>
+                  Need help with an accidental deletion, account recreation, or email reservation release? Reach out directly via our Contact form — no login required.
+                </p>
+                <a
+                  href="/contact"
+                  onClick={(e) => {
+                    if (onNavigateContact) {
+                      e.preventDefault();
+                      onNavigateContact();
+                    }
+                  }}
+                  style={{ color: '#0A66C2', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none', marginTop: '4px' }}
+                >
+                  Contact Support &rarr;
+                </a>
+              </div>
             </div>
           </section>
         </article>
@@ -174,6 +227,8 @@ export const SupportPage: React.FC<InfoPageNavigationProps> = ({
         onNavigateBlog={onNavigateBlog}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

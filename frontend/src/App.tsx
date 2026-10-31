@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { PolicyProvider, usePolicy } from './context/PolicyContext';
 import { ToastProvider } from './context/ToastContext';
@@ -32,18 +33,18 @@ import { AccessibilityPage } from './pages/AccessibilityPage';
 import { FeaturesPage } from './pages/FeaturesPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SecurityPage } from './pages/SecurityPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { ResumeCheckerPage } from './pages/ResumeCheckerPage';
 import { Loader2 } from 'lucide-react';
 import { resolvePostAuthRoute } from './utils/postAuthRoute';
-
-function normalizePath(path: string): string {
-  const clean = path.replace(/\/+$/, '') || '/';
-  return clean;
-}
+import { getSafeInternalRedirect, normalizePath } from './utils/redirect';
+export { getSafeInternalRedirect, normalizePath };
 
 const PUBLIC_ROUTES = [
   '/',
   '/login',
   '/signup',
+  '/resume-checker',
   '/forgot-password',
   '/reset-password',
   '/about',
@@ -69,19 +70,17 @@ const isPublicRoute = (path: string) => {
 function AppContent() {
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const { hasAcceptedPolicy, isCheckingPolicy } = usePolicy();
-  const { isOnboardingCompleted, isLoading: isProfileLoading } = useProfile();
+  const { isOnboardingCompleted, isLoading: isProfileLoading, profile } = useProfile();
   const postAuthRoute = resolvePostAuthRoute({
     isAuthLoading,
     isAuthenticated,
     isPolicyLoading: isCheckingPolicy,
     hasAcceptedPolicy,
     isProfileLoading,
-    onboardingCompleted: isOnboardingCompleted,
+    onboardingCompleted: isOnboardingCompleted || Boolean(profile?.onboarding_completed),
   });
 
-  const [currentPath, setCurrentPath] = useState<string>(() =>
-    normalizePath(window.location.pathname)
-  );
+  const { currentPath, navigate } = useNavigation();
 
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     const p = normalizePath(window.location.pathname);
@@ -89,61 +88,96 @@ function AppContent() {
     if (p === '/jobs') return 'jobs';
     if (p === '/applications') return 'applications';
     if (p === '/automation') return 'automation';
+    if (p === '/settings') return 'settings';
     return 'dashboard';
   });
 
   const [targetRunId, setTargetRunId] = useState<string | null>(null);
   const [targetApplicationId, setTargetApplicationId] = useState<string | null>(null);
 
-  // Sync browser URL history
-  const navigate = useCallback((path: string) => {
-    const normalized = normalizePath(path);
-    if (window.location.pathname !== normalized) {
-      window.history.pushState(null, '', normalized);
-    }
-    setCurrentPath(normalized);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
-  const routeUserAfterAuth = useCallback(() => {
-    // Leave callback/login/reset screens; the render gates below wait for the
-    // restored session, policy result, and profile before choosing a destination.
-    if (postAuthRoute === 'dashboard') {
-      setCurrentTab('dashboard');
-      navigate('/dashboard');
-    } else if (postAuthRoute === 'onboarding') {
-      navigate('/onboarding');
-    } else {
-      navigate('/');
-    }
-  }, [navigate, postAuthRoute]);
+  // Preserve mounted tab instances to eliminate unmounting, filter loss, and re-fetching spinners
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabType>>(() => new Set([currentTab]));
 
   useEffect(() => {
-    const handlePopState = () => {
-      const p = normalizePath(window.location.pathname);
-      setCurrentPath(p);
+    setVisitedTabs((prev) => {
+      if (prev.has(currentTab)) return prev;
+      const next = new Set(prev);
+      next.add(currentTab);
+      return next;
+    });
+  }, [currentTab]);
 
-      if (p === '/profile') setCurrentTab('profile');
-      else if (p === '/jobs') setCurrentTab('jobs');
-      else if (p === '/applications') setCurrentTab('applications');
-      else if (p === '/automation') setCurrentTab('automation');
-      else if (p === '/dashboard') setCurrentTab('dashboard');
+  useEffect(() => {
+    const handleAuthCleanup = () => {
+      setVisitedTabs(new Set(['dashboard']));
+      setTargetRunId(null);
+      setTargetApplicationId(null);
     };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('auth:logout', handleAuthCleanup);
+    window.addEventListener('auth:cleared', handleAuthCleanup);
+    return () => {
+      window.removeEventListener('auth:logout', handleAuthCleanup);
+      window.removeEventListener('auth:cleared', handleAuthCleanup);
+    };
   }, []);
+
+  // Synchronize active tab when router currentPath updates
+  useEffect(() => {
+    if (currentPath === '/profile') setCurrentTab('profile');
+    else if (currentPath === '/jobs') setCurrentTab('jobs');
+    else if (currentPath === '/applications') setCurrentTab('applications');
+    else if (currentPath === '/automation') setCurrentTab('automation');
+    else if (currentPath === '/settings') setCurrentTab('settings');
+    else if (currentPath === '/dashboard') setCurrentTab('dashboard');
+  }, [currentPath]);
+
+
+
+
+  const routeUserAfterAuth = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    const redirectParam = getSafeInternalRedirect(
+      params.get('redirect') || params.get('returnTo') || params.get('next')
+    );
+
+    if (postAuthRoute === 'dashboard') {
+      const dest = redirectParam || '/dashboard';
+      if (dest === '/dashboard') setCurrentTab('dashboard');
+      navigate(dest);
+    } else if (postAuthRoute === 'onboarding') {
+      navigate('/onboarding');
+    }
+    // Note: If still resolving (auth-loading, policy-loading, profile-loading),
+    // NEVER navigate to '/'! The authenticated render gates or the postAuthRoute
+    // resolution effect below will route the user to their destination as soon as ready.
+  }, [navigate, postAuthRoute]);
 
   // Enforce onboarding flow transitions and authenticated / unauthenticated guards
   useEffect(() => {
-    if (postAuthRoute === 'onboarding' && currentPath !== '/onboarding') {
-      navigate('/onboarding');
-    } else if (
-      postAuthRoute === 'dashboard' &&
-      ['/login', '/signup', '/verify-email', '/auth/callback', '/onboarding'].includes(currentPath)
-    ) {
-      setCurrentTab('dashboard');
-      navigate('/dashboard');
+    const authEntryPaths = ['/login', '/signup', '/verify-email', '/auth/callback'];
+    const isAuthEntryPath = authEntryPaths.includes(currentPath);
+
+    if (isAuthenticated) {
+      const params = new URLSearchParams(window.location.search);
+      const redirectParam = getSafeInternalRedirect(
+        params.get('redirect') || params.get('returnTo') || params.get('next')
+      );
+
+      if (
+        (isAuthEntryPath && postAuthRoute === 'onboarding') ||
+        (postAuthRoute === 'onboarding' && currentPath !== '/onboarding' && !isPublicRoute(currentPath))
+      ) {
+        navigate('/onboarding');
+      } else if (
+        postAuthRoute === 'dashboard' &&
+        ['/login', '/signup', '/verify-email', '/auth/callback', '/onboarding'].includes(currentPath)
+      ) {
+        const dest = (['/login', '/signup', '/auth/callback'].includes(currentPath) && redirectParam)
+          ? redirectParam
+          : '/dashboard';
+        if (dest === '/dashboard') setCurrentTab('dashboard');
+        navigate(dest);
+      }
     } else if (
       !isAuthenticated &&
       !isAuthLoading &&
@@ -188,14 +222,19 @@ function AppContent() {
     onNavigatePrivacy: () => navigate('/privacy'),
     onNavigateGuidelines: () => navigate('/guidelines'),
     onNavigateSupport: () => navigate('/support'),
-    onNavigateBlog: () => navigate('/blog'),
+    onNavigateBlog: (path?: string) => navigate(path || '/blog'),
     onNavigateFeatures: () => navigate('/features'),
     onNavigatePricing: () => navigate('/pricing'),
     onNavigateCareers: () => navigate('/careers'),
     onNavigateAccessibility: () => navigate('/accessibility'),
     onNavigateSecurity: () => navigate('/security'),
     onNavigateIntegrations: () => navigate('/integrations'),
-    onNavigateContact: () => navigate('/contact'),
+    onNavigateContact: (path?: string) => navigate(path || '/contact'),
+    isAuthenticated,
+    onNavigateDashboard: () => {
+      setCurrentTab('dashboard');
+      navigate('/dashboard');
+    },
   };
 
   // 1. Initial auth restoration loader - ONLY on protected routes while restoring session!
@@ -321,6 +360,10 @@ function AppContent() {
     return <SecurityPage {...publicNavProps} />;
   }
 
+  if (currentPath === '/resume-checker') {
+    return <ResumeCheckerPage />;
+  }
+
   // 7. Public Blog Listing at '/blog' or alias '/guides'
   if (currentPath === '/blog' || currentPath === '/guides') {
     return (
@@ -343,8 +386,8 @@ function AppContent() {
     );
   }
 
-  // 9. Public Landing Page at '/' for unauthenticated visitors
-  if (currentPath === '/' && !isAuthenticated) {
+  // 9. Public Landing Page at '/'
+  if (currentPath === '/') {
     return <LandingPage {...publicNavProps} />;
   }
 
@@ -373,12 +416,14 @@ function AppContent() {
           onNavigateHome={() => navigate('/')}
           onNavigateTerms={() => navigate('/terms')}
           onNavigatePrivacy={() => navigate('/privacy')}
+          onNavigateSupport={() => navigate('/support')}
           onNavigateVerifyEmail={(email) => {
             navigate(`/verify-email?email=${encodeURIComponent(email)}`);
           }}
         />
       );
     }
+
 
     if (currentPath === '/') {
       return <LandingPage {...publicNavProps} />;
@@ -450,60 +495,99 @@ function AppContent() {
   if (postAuthRoute === 'onboarding' || currentPath === '/onboarding') {
     return (
       <OnboardingPage
-        onSuccess={routeUserAfterAuth}
+        onSuccess={() => {
+          const params = new URLSearchParams(window.location.search);
+          const redirectParam = getSafeInternalRedirect(
+            params.get('redirect') || params.get('returnTo') || params.get('next')
+          );
+          const dest = redirectParam || '/dashboard';
+          setCurrentTab('dashboard');
+          navigate(dest);
+        }}
         onSignOut={() => navigate('/login')}
       />
     );
   }
 
-  // 10. Main Application Dashboard & Management Tabs
+  // 10. Main Application Dashboard & Management Tabs (Persistent Tab Instances)
   return (
-    <AppLayout currentTab={currentTab} onTabChange={handleTabChange}>
-      {currentTab === 'dashboard' && (
-        <DashboardPage
-          onNavigateTab={handleTabChange}
-          onNavigateToRun={handleNavigateToRun}
-          onNavigateToApplication={handleNavigateToApplication}
-        />
+    <AppLayout currentTab={currentTab} onTabChange={handleTabChange} onNavigate={navigate}>
+      {visitedTabs.has('dashboard') && (
+        <div style={{ display: currentTab === 'dashboard' ? 'block' : 'none', minHeight: '100%' }}>
+          <DashboardPage
+            onNavigateTab={handleTabChange}
+            onNavigateToRun={handleNavigateToRun}
+            onNavigateToApplication={handleNavigateToApplication}
+            isActive={currentTab === 'dashboard'}
+          />
+        </div>
       )}
-      {currentTab === 'profile' && <ProfilePage onNavigateTab={handleTabChange} />}
-      {currentTab === 'jobs' && (
-        <JobsPage
-          onNavigateToApplications={handleNavigateToApplication}
-          onNavigateToRun={handleNavigateToRun}
-        />
+      {visitedTabs.has('profile') && (
+        <div style={{ display: currentTab === 'profile' ? 'block' : 'none', minHeight: '100%' }}>
+          <ProfilePage onNavigateTab={handleTabChange} isActive={currentTab === 'profile'} />
+        </div>
       )}
-      {currentTab === 'applications' && (
-        <ApplicationsPage
-          initialApplicationId={targetApplicationId}
-          onClearInitialApplication={() => setTargetApplicationId(null)}
-          onNavigateToJobs={() => handleTabChange('jobs')}
-          onNavigateToRun={handleNavigateToRun}
-        />
+      {visitedTabs.has('jobs') && (
+        <div style={{ display: currentTab === 'jobs' ? 'block' : 'none', minHeight: '100%' }}>
+          <JobsPage
+            onNavigateToApplications={handleNavigateToApplication}
+            onNavigateToRun={handleNavigateToRun}
+            isActive={currentTab === 'jobs'}
+          />
+        </div>
       )}
-      {currentTab === 'automation' && (
-        <AutomationPage
-          initialRunId={targetRunId}
-          onClearInitialRun={() => setTargetRunId(null)}
-          onNavigateToApplication={handleNavigateToApplication}
-          onNavigateTab={handleTabChange}
-        />
+      {visitedTabs.has('applications') && (
+        <div style={{ display: currentTab === 'applications' ? 'block' : 'none', minHeight: '100%' }}>
+          <ApplicationsPage
+            initialApplicationId={targetApplicationId}
+            onClearInitialApplication={() => setTargetApplicationId(null)}
+            onNavigateToJobs={() => handleTabChange('jobs')}
+            onNavigateToRun={handleNavigateToRun}
+            isActive={currentTab === 'applications'}
+          />
+        </div>
+      )}
+      {visitedTabs.has('automation') && (
+        <div style={{ display: currentTab === 'automation' ? 'block' : 'none', minHeight: '100%' }}>
+          <AutomationPage
+            initialRunId={targetRunId}
+            onClearInitialRun={() => setTargetRunId(null)}
+            onNavigateToApplication={handleNavigateToApplication}
+            onNavigateTab={handleTabChange}
+            isActive={currentTab === 'automation'}
+          />
+        </div>
+      )}
+      {visitedTabs.has('settings') && (
+        <div style={{ display: currentTab === 'settings' ? 'block' : 'none', minHeight: '100%' }}>
+          <SettingsPage
+            onNavigateProfile={() => handleTabChange('profile')}
+            onNavigateSupport={() => navigate('/support')}
+            onNavigateTerms={() => navigate('/terms')}
+            onNavigatePrivacy={() => navigate('/privacy')}
+            onNavigateGuidelines={() => navigate('/guidelines')}
+            onNavigateTab={handleTabChange}
+          />
+        </div>
       )}
     </AppLayout>
   );
 }
 
+
 export function App() {
   return (
-    <AuthProvider>
-      <PolicyProvider>
-        <ToastProvider>
-          <ProfileProvider>
-            <AppContent />
-          </ProfileProvider>
-        </ToastProvider>
-      </PolicyProvider>
-    </AuthProvider>
+    <NavigationProvider>
+      <AuthProvider>
+        <PolicyProvider>
+          <ToastProvider>
+            <ProfileProvider>
+              <AppContent />
+            </ProfileProvider>
+          </ToastProvider>
+        </PolicyProvider>
+      </AuthProvider>
+    </NavigationProvider>
   );
 }
 

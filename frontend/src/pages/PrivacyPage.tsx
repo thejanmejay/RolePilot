@@ -15,6 +15,8 @@ export const PrivacyPage: React.FC<InfoPageNavigationProps> = ({
   onNavigateGuidelines,
   onNavigateSupport,
   onNavigateBlog,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
   useEffect(() => {
     document.title = 'Privacy Policy — RolePilot';
@@ -25,14 +27,18 @@ export const PrivacyPage: React.FC<InfoPageNavigationProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateHome}
+            onClick={isAuthenticated && onNavigateDashboard ? onNavigateDashboard : onNavigateHome}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateHome();
+                if (isAuthenticated && onNavigateDashboard) {
+                  onNavigateDashboard();
+                } else {
+                  onNavigateHome();
+                }
               }
             }}
             aria-label="RolePilot Home"
@@ -50,22 +56,36 @@ export const PrivacyPage: React.FC<InfoPageNavigationProps> = ({
               <ArrowLeft size={16} />
               <span>Back to home</span>
             </button>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -178,13 +198,69 @@ export const PrivacyPage: React.FC<InfoPageNavigationProps> = ({
           <section className="info-section">
             <div className="info-section-heading">
               <Shield size={20} color="#0A66C2" />
-              <h2>5. Data Retention and Account Deletion</h2>
+              <h2>5. Data Retention, Account Deletion, and Email Reservation</h2>
             </div>
             <p>
-              We retain candidate profile information, resumes, and application records for as long as your account remains active so you can track ongoing job searches across interview cycles.
+              We retain candidate profile information, resumes, and application records for as long as your account remains active so you can organize ongoing job searches across interview cycles.
             </p>
             <p>
-              <strong>Your Right to Deletion:</strong> You have full control over your data. You may update or remove individual resumes, skills, or job records directly in your dashboard. You may also request complete account deletion at any time via the in-app settings or account deletion endpoint (<code>DELETE /api/v1/account</code>), which permanently purges your candidate profile, uploaded resumes, and application logs from the active database.
+              <strong>Your Right to Permanent Deletion:</strong> You may request complete account deletion at any time via the in-app settings (<em>Danger Zone &gt; Permanently Delete Account</em>) or via the authenticated deletion endpoint (<code>DELETE /api/v1/account</code>).
+            </p>
+            <p>
+              <strong>Personal Data Purged Upon Deletion:</strong> Executing account deletion permanently purges all candidate personal data and operational records across our infrastructure:
+            </p>
+            <ul className="info-checklist">
+              <li>
+                <strong>Cloud Object Storage:</strong> All uploaded resume binary files stored in private cloud storage (<code>resumes/{'{user_id}'}/</code>) are removed.
+              </li>
+              <li>
+                <strong>Resume Metadata &amp; Parsed Content:</strong> Resume filenames, version histories, and parsed text representations.
+              </li>
+              <li>
+                <strong>Candidate Profile &amp; History:</strong> Full name, professional headline, contact location, telephone number, work experience entries, educational degrees, and core skills inventory.
+              </li>
+              <li>
+                <strong>Job Preferences &amp; Search Configs:</strong> Target titles, salary expectations, preferred locations, and custom automated search configurations.
+              </li>
+              <li>
+                <strong>Applications &amp; Review Logs:</strong> Job tracking stages, pre-staged application answers, human review confirmations, automation runs, and diagnostic log streams.
+              </li>
+              <li>
+                <strong>Connected Integrations:</strong> External platform credentials (such as encrypted LinkedIn account records and session tokens).
+              </li>
+              <li>
+                <strong>Identity &amp; Authentication:</strong> Consent acceptance records and primary user authentication identities in Supabase Auth.
+              </li>
+            </ul>
+            <p>
+              <strong>Minimal Data Retained Post-Deletion:</strong> Following deletion, RolePilot retains only a single minimal record in our secure database:
+            </p>
+            <ul className="info-checklist">
+              <li>
+                <strong>Normalized Email Reservation:</strong> A canonically normalized representation of your email address (lowercased, trimmed of whitespace, and stripped of trailing periods), an internal system identifier, the reservation reason (<code>account_deleted</code>), and the deletion timestamp.
+              </li>
+            </ul>
+            <p>
+              <strong>Why Normalized Email Reservations Are Retained:</strong> We retain this reservation to prevent unauthorized account re-registration or recycling of deleted identities. When any applicant attempts to sign up, our registration service verifies that the email identity is not reserved by a deleted account. This defends applicant security, prevents unauthorized impersonation, and ensures system integrity.
+            </p>
+            <p>
+              <strong>Retention Schedule &amp; Approved Policy Status:</strong> Normalized email reservations are currently retained indefinitely to preserve the re-registration restriction. <em>Notice:</em> Defining an automated expiration schedule or time-bounded retention window (such as 12 or 24 months) is currently a pending product decision requiring formal business and legal approval. RolePilot does not invent unapproved retention expirations or claim unverified legal compliance without formal policy adoption.
+            </p>
+            <p>
+              <strong>Mistaken Deletion &amp; Account Assistance:</strong> If your account was deleted by mistake or if you are a former user requesting account recreation or release of a reserved email, you can contact RolePilot Support directly via our public{' '}
+              <a
+                href="/support"
+                onClick={(e) => {
+                  if (onNavigateSupport) {
+                    e.preventDefault();
+                    onNavigateSupport();
+                  }
+                }}
+                style={{ color: '#0A66C2', textDecoration: 'underline' }}
+              >
+                Help &amp; Support page
+              </a>{' '}
+              or the public Contact page (topic: &ldquo;Account and Privacy&rdquo;) without requiring an active login.
             </p>
           </section>
 
@@ -231,6 +307,8 @@ export const PrivacyPage: React.FC<InfoPageNavigationProps> = ({
         onNavigateBlog={onNavigateBlog}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

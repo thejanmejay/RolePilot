@@ -69,16 +69,31 @@ def build_search_url(search: SearchConfig, start: int = 0) -> str:
         "keywords": search.keywords,
     }
 
-    # Use geoId if provided, otherwise fall back to location text
+    # Clean location: If location contains comma-separated values like "Noida, Remote",
+    # extract the real geographic city and map "remote" to LinkedIn's work mode filter.
+    loc = (search.location or "").strip()
+    remote_tokens: list[str] = []
+    if loc:
+        parts = [p.strip() for p in loc.split(",") if p.strip()]
+        geo_parts: list[str] = []
+        for p in parts:
+            if p.lower() in ("remote", "work from home", "wfh"):
+                remote_tokens.append("remote")
+            else:
+                geo_parts.append(p)
+        cleaned_loc = ", ".join(geo_parts) if geo_parts else ("India" if remote_tokens else loc)
+    else:
+        cleaned_loc = ""
+
+    # Use geoId if provided, otherwise fall back to cleaned location text
     if search.geo_id:
         params["geoId"] = search.geo_id
-    elif search.location:
-        # Try to resolve common location names to geoIds
-        geo_id = GEO_IDS.get(search.location.lower(), "")
+    elif cleaned_loc:
+        geo_id = GEO_IDS.get(cleaned_loc.lower(), "")
         if geo_id:
             params["geoId"] = geo_id
         else:
-            params["location"] = search.location
+            params["location"] = cleaned_loc
 
     if search.distance is not None:
         params["distance"] = str(search.distance)
@@ -100,8 +115,19 @@ def build_search_url(search: SearchConfig, start: int = 0) -> str:
     if search.job_type and search.job_type in JOB_TYPE_MAP:
         params["f_JT"] = JOB_TYPE_MAP[search.job_type]
 
-    if search.remote and search.remote in REMOTE_MAP:
-        params["f_WT"] = REMOTE_MAP[search.remote]
+    # Work Mode / Remote filter: support single mode or comma-separated list like "remote,hybrid,on-site"
+    all_remote: list[str] = []
+    if search.remote:
+        all_remote.extend([r.strip().lower() for r in search.remote.split(",") if r.strip()])
+    all_remote.extend(remote_tokens)
+
+    if all_remote:
+        wt_codes: list[str] = []
+        for r in all_remote:
+            if r in REMOTE_MAP and REMOTE_MAP[r] not in wt_codes:
+                wt_codes.append(REMOTE_MAP[r])
+        if wt_codes:
+            params["f_WT"] = ",".join(wt_codes)
 
     if search.easy_apply_only:
         params["f_AL"] = "true"

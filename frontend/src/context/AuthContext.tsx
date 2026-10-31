@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase, authService } from '../services/authService';
+import { supabase, authService, getRememberMePreference, setRememberMePreference } from '../services/authService';
 
 export interface AuthContextType {
   token: string | null;
@@ -11,7 +11,7 @@ export interface AuthContextType {
   isLoading: boolean;
   isPasswordRecovery: boolean;
   clearPasswordRecovery: () => void;
-  login: (token: string, session?: Session | null, user?: User | null) => void;
+  login: (token: string, session?: Session | null, user?: User | null, rememberMe?: boolean) => void;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -39,10 +39,18 @@ export function hasStoredAuthSession(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     if (localStorage.getItem('supabase_access_token')) return true;
+    if (sessionStorage.getItem('supabase_access_token')) return true;
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
         const val = localStorage.getItem(key);
+        if (val && val !== '{}' && val !== 'null') return true;
+      }
+    }
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const val = sessionStorage.getItem(key);
         if (val && val !== '{}' && val !== 'null') return true;
       }
     }
@@ -58,7 +66,7 @@ export function hasStoredAuthSession(): boolean {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('supabase_access_token');
+      return localStorage.getItem('supabase_access_token') || sessionStorage.getItem('supabase_access_token');
     } catch {
       return null;
     }
@@ -66,7 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [email, setEmail] = useState<string | null>(() => {
     try {
-      const saved = localStorage.getItem('supabase_access_token');
+      const saved = localStorage.getItem('supabase_access_token') || sessionStorage.getItem('supabase_access_token');
       return saved ? parseJwtEmail(saved) : null;
     } catch {
       return null;
@@ -80,19 +88,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
-  const login = useCallback((newToken: string, newSession?: Session | null, newUser?: User | null) => {
-    const trimmed = newToken.trim();
-    try {
-      localStorage.setItem('supabase_access_token', trimmed);
-    } catch {
-      // Safe fallback
-    }
-    setToken(trimmed);
-    setEmail(newUser?.email || parseJwtEmail(trimmed));
-    if (newUser) setUser(newUser);
-    if (newSession) setSession(newSession);
-    setIsLoading(false);
-  }, []);
+  const login = useCallback(
+    (newToken: string, newSession?: Session | null, newUser?: User | null, rememberMe?: boolean) => {
+      const trimmed = newToken.trim();
+      const shouldRemember = rememberMe !== undefined ? rememberMe : getRememberMePreference();
+      setRememberMePreference(shouldRemember);
+      try {
+        if (shouldRemember) {
+          localStorage.setItem('supabase_access_token', trimmed);
+          sessionStorage.removeItem('supabase_access_token');
+        } else {
+          sessionStorage.setItem('supabase_access_token', trimmed);
+          localStorage.removeItem('supabase_access_token');
+        }
+      } catch {
+        // Safe fallback
+      }
+      setToken(trimmed);
+      setEmail(newUser?.email || parseJwtEmail(trimmed));
+      if (newUser) setUser(newUser);
+      if (newSession) setSession(newSession);
+      setIsLoading(false);
+    },
+    []
+  );
 
   const logout = useCallback(async () => {
     try {
@@ -142,8 +161,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const accessToken = data.session.access_token;
           setToken(accessToken);
           setEmail(currentUser?.email || parseJwtEmail(accessToken));
+          const remember = getRememberMePreference();
           try {
-            localStorage.setItem('supabase_access_token', accessToken);
+            if (remember) {
+              localStorage.setItem('supabase_access_token', accessToken);
+              sessionStorage.removeItem('supabase_access_token');
+            } else {
+              sessionStorage.setItem('supabase_access_token', accessToken);
+              localStorage.removeItem('supabase_access_token');
+            }
           } catch {
             // Safe fallback
           }
@@ -152,6 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setEmail(currentUser?.email || null);
           try {
             localStorage.removeItem('supabase_access_token');
+            sessionStorage.removeItem('supabase_access_token');
           } catch {
             // Safe fallback
           }
@@ -205,8 +232,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (isConfirmed) {
                 setToken(currentSession.access_token);
                 setEmail(currentUser?.email || parseJwtEmail(currentSession.access_token));
+                const remember = getRememberMePreference();
                 try {
-                  localStorage.setItem('supabase_access_token', currentSession.access_token);
+                  if (remember) {
+                    localStorage.setItem('supabase_access_token', currentSession.access_token);
+                    sessionStorage.removeItem('supabase_access_token');
+                  } else {
+                    sessionStorage.setItem('supabase_access_token', currentSession.access_token);
+                    localStorage.removeItem('supabase_access_token');
+                  }
                 } catch {
                   // Safe fallback
                 }
@@ -215,6 +249,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setEmail(currentUser?.email || null);
                 try {
                   localStorage.removeItem('supabase_access_token');
+                  sessionStorage.removeItem('supabase_access_token');
                 } catch {
                   // Safe fallback
                 }

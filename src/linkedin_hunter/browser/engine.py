@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+import glob
+import inspect
+import os
+import sys
+from pathlib import Path
+from typing import Any, Optional
 
+import playwright
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
 from linkedin_hunter.config import HunterConfig
@@ -24,14 +30,67 @@ class BrowserEngine:
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
 
+    def _find_fallback_chromium(self) -> Optional[str]:
+        """Search fallback locations for Chromium binary if expected path is missing."""
+        # 1. Search hermetic site-packages driver directory
+        try:
+            driver_dir = Path(inspect.getfile(playwright)).parent / "driver" / "package" / ".local-browsers"
+            if driver_dir.exists():
+                pattern_linux = str(driver_dir / "chromium-*" / "chrome-linux64" / "chrome")
+                matches = glob.glob(pattern_linux)
+                if not matches:
+                    pattern_mac = str(driver_dir / "chromium-*" / "chrome-mac*" / "**" / "Google Chrome for Testing")
+                    matches = glob.glob(pattern_mac, recursive=True)
+                if matches and os.path.isfile(matches[0]):
+                    return matches[0]
+        except Exception:
+            pass
+
+        # 2. Search user cache directory
+        try:
+            cache_dir = Path.home() / ".cache" / "ms-playwright"
+            if cache_dir.exists():
+                pattern_linux = str(cache_dir / "chromium-*" / "chrome-linux64" / "chrome")
+                matches = glob.glob(pattern_linux)
+                if matches and os.path.isfile(matches[0]):
+                    return matches[0]
+        except Exception:
+            pass
+
+        return None
+
+
     async def launch(self, headless: Optional[bool] = None) -> Page:
         """Launch browser and return a page."""
         bc = self.config.browser
-        use_headless = headless if headless is not None else bc.headless
+
+        # Auto-configure PLAYWRIGHT_BROWSERS_PATH on Render/production if not already set
+        if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+            is_render_env = (
+                os.getenv("RENDER") == "true"
+                or os.getenv("ENVIRONMENT") == "production"
+                or os.path.exists("/opt/render/project/src")
+            )
+            if is_render_env:
+                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
+        # Headless mode: Enforce headless on Render/production or Linux without DISPLAY;
+        # preserve local config for manual visual inspection
+        is_headless_server = (
+            os.getenv("RENDER") == "true"
+            or os.getenv("ENVIRONMENT") == "production"
+            or (sys.platform.startswith("linux") and "DISPLAY" not in os.environ)
+        )
+        if is_headless_server:
+            use_headless = True
+        elif headless is not None:
+            use_headless = headless
+        else:
+            use_headless = bc.headless
 
         self._playwright = await async_playwright().start()
 
-        launch_args = {
+        launch_args: dict[str, Any] = {
             "headless": use_headless,
             "slow_mo": bc.slow_mo,
             "args": [
@@ -39,10 +98,36 @@ class BrowserEngine:
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-infobars",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
             ],
         }
 
-        self._browser = await self._playwright.chromium.launch(**launch_args)
+        # Inspect executable path and discover fallback if default path is missing
+        expected_path = self._playwright.chromium.executable_path
+        if expected_path and os.path.isfile(expected_path):
+            launch_args["executable_path"] = expected_path
+        else:
+            fallback = self._find_fallback_chromium()
+            if fallback:
+                launch_args["executable_path"] = fallback
+                log.info("Using discovered Chromium fallback executable: %s", fallback)
+
+        try:
+            self._browser = await self._playwright.chromium.launch(**launch_args)
+        except Exception as exc:
+            err_msg = str(exc)
+            if "Executable doesn't exist" in err_msg or "Please run" in err_msg or "not found" in err_msg:
+                active_path = launch_args.get("executable_path") or expected_path
+                log.error("Chromium executable missing at %s: %s", active_path, err_msg)
+                raise RuntimeError(
+                    f"Chromium executable not found at '{active_path}'. "
+                    "Render remediation: ensure Render Build Command includes "
+                    "'export PLAYWRIGHT_BROWSERS_PATH=0 && python -m pip install -r requirements.txt && python -m playwright install --with-deps chromium' "
+                    "and PLAYWRIGHT_BROWSERS_PATH=0 is added to environment variables."
+                ) from exc
+            raise
 
         context_args = {
             "viewport": {"width": 1366, "height": 768},

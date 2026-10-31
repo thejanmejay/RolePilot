@@ -13,6 +13,7 @@ from backend.app.schemas.policy import (
     PolicyAcceptResponse,
     PolicyStatusResponse,
 )
+from backend.app.services.account_service import AccountService
 from backend.app.services.policy_service import PolicyService
 
 router = APIRouter(prefix="/policy", tags=["Policy"])
@@ -24,8 +25,16 @@ def require_policy_accepted(
 ) -> uuid.UUID:
     """FastAPI dependency requiring active policy acceptance for protected routes.
     
+    Returns 401 Unauthorized if the account has been deleted.
     Returns 403 Forbidden if the user has not accepted the currently active policy version.
     """
+    if AccountService.is_account_deleted(db, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deleted.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if not PolicyService.has_accepted_active_policy(db, user_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -41,6 +50,12 @@ def get_policy_acceptance_status(
     db: Session = Depends(get_db),
 ):
     """Retrieve policy acceptance status for the authenticated user."""
+    if AccountService.is_account_deleted(db, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deleted.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return PolicyService.get_acceptance_status(db, user_id)
 
 
@@ -51,6 +66,12 @@ def accept_policy(
     db: Session = Depends(get_db),
 ):
     """Record acceptance of the platform policy for the authenticated user."""
+    if AccountService.is_account_deleted(db, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deleted.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return PolicyService.accept_policy(
         db=db,
         user_id=user_id,

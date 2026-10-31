@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { RolePilotLogo } from '../components/common/RolePilotLogo';
 import { PublicFooter } from '../components/common/PublicFooter';
+import { ExtensionPromotion } from '../components/extension/ExtensionPromotion';
+import { useNavigation } from '../context/NavigationContext';
 import '../components/auth/auth.css';
 
 interface LandingPageProps {
@@ -37,6 +39,8 @@ interface LandingPageProps {
   onNavigateSecurity?: () => void;
   onNavigateIntegrations?: () => void;
   onNavigateContact?: () => void;
+  isAuthenticated?: boolean;
+  onNavigateDashboard?: () => void;
 }
 
 const FAQ_ITEMS = [
@@ -98,7 +102,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onNavigateSecurity,
   onNavigateIntegrations,
   onNavigateContact,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
+  const { navigate } = useNavigation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
@@ -108,6 +115,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   const handleNavClick = () => {
     setMobileMenuOpen(false);
+  };
+
+  const handleBrandLogoClick = () => {
+    if (isAuthenticated && onNavigateDashboard) {
+      onNavigateDashboard();
+    } else {
+      onNavigateSignup();
+    }
   };
 
   const toggleFaq = (index: number) => {
@@ -120,14 +135,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateSignup}
+            onClick={handleBrandLogoClick}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateSignup();
+                handleBrandLogoClick();
               }
             }}
             aria-label="RolePilot Home"
@@ -137,6 +152,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Desktop Navigation Links */}
           <nav className="landing-nav-links" aria-label="Main Navigation">
+            <a
+              href="/resume-checker"
+              className="landing-nav-link"
+              style={{ color: 'var(--primary)', fontWeight: 600 }}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/resume-checker');
+              }}
+            >
+              ATS Checker
+            </a>
             <a href="#features" className="landing-nav-link">
               Features
             </a>
@@ -168,24 +194,38 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Header Action Buttons */}
           <div className="landing-header-actions">
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-              aria-label="Log in to your RolePilot account"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-              aria-label="Get started with RolePilot"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                  aria-label="Log in to your RolePilot account"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                  aria-label="Get started with RolePilot"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="landing-mobile-menu-btn"
@@ -201,6 +241,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         {/* Mobile Navigation Dropdown */}
         {mobileMenuOpen && (
           <nav className="landing-mobile-menu" aria-label="Mobile Navigation">
+            <a
+              href="/resume-checker"
+              className="landing-mobile-nav-link"
+              style={{ color: 'var(--primary)', fontWeight: 600 }}
+              onClick={(e) => {
+                e.preventDefault();
+                handleNavClick();
+                navigate('/resume-checker');
+              }}
+            >
+              ATS Checker
+            </a>
             <a href="#features" className="landing-mobile-nav-link" onClick={handleNavClick}>
               Features
             </a>
@@ -230,30 +282,47 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </a>
             )}
             <div className="landing-mobile-menu-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  handleNavClick();
-                  onNavigateLogin();
-                }}
-                className="auth-btn-secondary"
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                <LogIn size={16} />
-                <span>Log in</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleNavClick();
-                  onNavigateSignup();
-                }}
-                className="landing-btn-hero-primary"
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                <span>Get started</span>
-                <ArrowRight size={16} />
-              </button>
+              {isAuthenticated && onNavigateDashboard ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleNavClick();
+                    onNavigateDashboard();
+                  }}
+                  className="landing-btn-hero-primary"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  <span>Go to Dashboard</span>
+                  <ArrowRight size={16} />
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleNavClick();
+                      onNavigateLogin();
+                    }}
+                    className="auth-btn-secondary"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    <LogIn size={16} />
+                    <span>Log in</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleNavClick();
+                      onNavigateSignup();
+                    }}
+                    className="landing-btn-hero-primary"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    <span>Get started</span>
+                    <ArrowRight size={16} />
+                  </button>
+                </>
+              )}
             </div>
           </nav>
         )}
@@ -604,6 +673,44 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
+      {/* Free ATS Resume Checker Section Container */}
+      <section id="resume-checker" className="landing-card-section landing-resume-checker-card" aria-labelledby="resume-checker-heading">
+        <div className="landing-resume-checker-layout">
+          <div className="landing-resume-checker-content">
+            <span className="landing-resume-checker-eyebrow">Free Career Tool</span>
+            <h2 id="resume-checker-heading" className="landing-resume-checker-title">
+              Check Your Resume's ATS Pass-Through Rate
+            </h2>
+            <p className="landing-resume-checker-description">
+              Over 75% of resumes are filtered out before reaching a human recruiter. Test your PDF resume against real Applicant Tracking System scoring heuristics — 100% free with no account required.
+            </p>
+            <ul className="landing-resume-checker-benefits">
+              <li><CheckCircle2 size={16} aria-hidden="true" /> Instant Deterministic Score</li>
+              <li><CheckCircle2 size={16} aria-hidden="true" /> Keyword Density Audit</li>
+              <li><CheckCircle2 size={16} aria-hidden="true" /> Actionable Fixes</li>
+            </ul>
+            <button
+              type="button"
+              onClick={() => navigate('/resume-checker')}
+              className="landing-btn-hero-primary landing-resume-checker-cta"
+            >
+              <span>Scan Your Resume Now — Free</span>
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="landing-resume-checker-preview">
+            <div className="landing-resume-checker-score">
+              <span>92%</span>
+            </div>
+            <div className="landing-resume-checker-grade">Grade: A (ATS Ready)</div>
+            <p className="landing-resume-checker-preview-note">
+              Tested against modern enterprise ATS standards.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* 4. Frequently Asked Questions Container */}
       <section id="faq" className="landing-card-section landing-faq-card" aria-labelledby="faq-heading">
         <div className="landing-section-header">
@@ -652,6 +759,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
+      <ExtensionPromotion
+        placement="marketing"
+        isAuthenticated={isAuthenticated}
+        onGetStarted={onNavigateSignup}
+        onOpenDashboard={onNavigateDashboard}
+      />
+
       {/* Footer */}
       <PublicFooter
         onNavigateHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -670,6 +784,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         onNavigateContact={onNavigateContact}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

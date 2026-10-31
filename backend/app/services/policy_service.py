@@ -88,6 +88,15 @@ class PolicyService:
                 detail=f"Invalid policy version '{chosen_version}'. Active version is '{active_version}'.",
             )
 
+        from backend.app.services.account_service import AccountService
+
+        if AccountService.is_account_deleted(db, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This account has been deleted.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         # Ensure user profile exists to satisfy foreign key constraint
         profile = db.get(Profile, user_id)
         if not profile:

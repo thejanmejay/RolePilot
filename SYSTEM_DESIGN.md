@@ -14,7 +14,7 @@
 ### Core Architectural Tenets
 1. **Humanized Anti-Detection First:** Automated browser sessions simulate realistic human latency, non-linear cursor movements (Bézier curves), natural typing jitter, and browser fingerprint masking to evade bot detection algorithms.
 2. **Fail-Safe Triple-Key Guardrail:** Safety is paramount. Application submissions default to non-submitting dry runs (`dry_run=True`). Real submission requires three independent matching confirmation keys, strictly capped at single-job execution during live mode.
-3. **Proven End-to-End Automation Core:** The core LinkedIn Easy Apply browser automation engine is battle-tested and proven. Live validation has confirmed successful completion through modal detection, smart heuristic filling, triple-key gating, real submission, post-submission modal verification (`SUBMISSION_CONFIRMED`), and persistent database recording (`applied`).
+3. **Existing Automation Core:** The LinkedIn automation engine uses the existing session-ID workflow, with dry-run behavior and a server-side Triple-Key gate for live submissions.
 4. **Strict Multi-Tenant Isolation:** All database transactions and file assets are strictly scoped to authenticated user UUIDs verified against cryptographically signed JWTs.
 5. **Transparent Telemetry & Auditability:** Every action—modal transition, field classification, value matched, or safety block—is recorded as structured event logs accessible in real time via the SaaS dashboard.
 6. **Adaptive Hybrid Heuristics:** Form filling relies on exact normalized matching, numeric range extraction, positional fallbacks, resume NLP extraction, and human-in-the-loop fallback prompts.
@@ -29,14 +29,13 @@ The following diagram illustrates the interaction between the client interfaces,
 graph TB
     subgraph Client_Interfaces ["Client Presentation Tier"]
         FE["React 19 / Vite 8 SaaS Frontend<br/>(Port 3000 / Modern CSS)"]
-        EXT["Chrome Extension 'ApplyPie'<br/>(Manifest V3 Side Panel & Content Script)"]
+        EXT["RolePilot Chrome Extension<br/>(Manifest V3 Side Panel)"]
         CLI["LinkedIn Hunter CLI<br/>(Click + Rich Terminal)"]
     end
 
     subgraph Gateway_Tier ["API Gateway & Auth"]
         API["FastAPI Backend Server<br/>(Port 8000 /api/v1)"]
         JWT_AUTH["Supabase JWT Auth Guard<br/>(HS256 / RS256 Bearer)"]
-        PROXY["Local AI Proxy Server<br/>(demo-server: Port 3456)"]
     end
 
     subgraph Service_Tier ["Backend Application Services"]
@@ -66,15 +65,12 @@ graph TB
     subgraph External_Platforms ["Target External Systems"]
         LI["LinkedIn Web Application<br/>(Easy Apply & Search)"]
         WORKDAY["External ATS Portals<br/>(Workday / Greenhouse / Lever)"]
-        CLAUDE_API["Anthropic Claude AI API"]
     end
 
     %% Client to API Connections
     FE -->|REST + Bearer Token| API
     CLI -->|Local Direct Execution| Automation_Engine
-    EXT -->|Assisted Extraction| WORKDAY
-    EXT -->|Claude AI Prompts| PROXY
-    PROXY -->|OAuth / API Key| CLAUDE_API
+    EXT -->|Supabase Auth + REST Bearer Token| API
 
     %% Gateway to Services
     API --> JWT_AUTH
@@ -247,30 +243,8 @@ The workspace is organized into modular packages separating the standalone autom
 │           ├── JobsPage.tsx
 │           └── ProfilePage.tsx
 │
-├── chrome-extension/            # "ApplyPie" Companion Browser Extension (Manifest V3)
-│   ├── manifest.json            # Extension permissions, background worker, sidePanel, content scripts
-│   ├── background/
-│   │   └── service-worker.js    # Chrome runtime coordinator
-│   ├── sidebar/                 # Interactive Side Panel UI
-│   │   ├── sidebar.html
-│   │   ├── sidebar.css
-│   │   └── sidebar.js
-│   ├── popup/                   # Quick Action Toolbar Popup
-│   │   ├── popup.html
-│   │   ├── popup.css
-│   │   └── popup.js
-│   ├── content/
-│   │   └── content-script.js    # Content script for external ATS DOM interrogation
-│   ├── lib/
-│   │   ├── claude-client.js     # AI communication client
-│   │   ├── message-router.js    # Message routing between tabs, popup, and sidebar
-│   │   └── state-manager.js     # User preferences & active job context
-│   └── config/
-│       └── prompts.js           # Prompt engineering templates for form question solving
-│
-├── demo-server/                 # Local AI Proxy Server
-│   ├── package.json
-│   └── server.js                # Bridges extension requests with Claude CLI OAuth token
+├── chrome-extension/rolepilot/  # RolePilot Manifest V3 extension source
+├── chrome-extension/rolepilot-build/ # Locally generated unpacked extension (ignored)
 │
 ├── tests/                       # Pytest Test Automation & Quality Assurance Suite (57/57 Passing)
 │   ├── test_backend.py          # FastAPI endpoint integration, JWT auth, tenant isolation (37 tests)
@@ -620,11 +594,12 @@ To protect user accounts from automated scraping and bot identification by Linke
 | **PostgreSQL / Supabase Schema** | ✅ **Implemented & Validated** | 11 ORM models in `backend/app/db/models/` |
 | **Test Automation Suite** | ✅ **Implemented (57/57 Passed)** | `tests/test_backend.py`, `test_fixes.py`, `test_playwright_apply.py` |
 | **Frontend Base Views** | ✅ **Implemented** | Profile, Jobs, Applications, Automation in `frontend/src/` |
+| **RolePilot Chrome Extension** | ✅ **Implemented for local testing** | Authenticated side panel, profile/preferences, dry-run search, run history; live Apply to Jobs remains disabled |
 | **Dedicated Executive Dashboard** | 🟡 **Next Immediate Priority** | High-level metrics, Application Readiness score, Pipeline Funnel |
 | **Enhanced Run Details UX** | 🟡 **Next Immediate Priority** | Full-fidelity step inspector & telemetry breakdown |
 | **Live Submission UX** | 🟡 **Next Immediate Priority** | Interactive modal confirmation with explicit token entry |
 | **Server-Sent Events (SSE) Logs** | 🔵 *Planned (Phase 2)* | Real-time live log streaming replacing polling |
-| **Chrome Extension SaaS Bridge** | 🔵 *Planned (Phase 3)* | Sync `ApplyPie` extension storage with `/api/v1` backend |
+| **Chrome Extension Store Release** | 🔵 *Pending* | Local extension is not published; no Web Store listing is configured |
 | **External ATS Automation** | 🔵 *Planned (Phase 3)* | Workday, Greenhouse, Lever multi-page wizard support |
 | **Distributed Task Queue** | 🟣 *Planned (Phase 4)* | Celery / Redis background worker pool |
 | **Automated Session Refresh** | 🟣 *Planned (Phase 4)* | Background session keepalive and cookie auto-refresh |
@@ -651,7 +626,7 @@ graph TD
     end
 
     subgraph Phase3 ["PHASE 3: Platform Expansion"]
-        P3_1["Chrome Extension ↔ SaaS Bridge<br/>(ApplyPie extension sync with backend API)"]
+        P3_1["RolePilot Chrome Extension Release<br/>(store review and security readiness)"]
         P3_2["External ATS Support<br/>(Workday, Greenhouse, Lever multi-page wizards)"]
     end
 

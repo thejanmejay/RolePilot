@@ -109,6 +109,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       const res = await authService.signIn({
         email: email.trim(),
         password,
+        rememberMe,
       });
 
       if (!res.success) {
@@ -126,7 +127,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       }
 
       if (res.token) {
-        login(res.token, res.session, res.user);
+        login(res.token, res.session, res.user, rememberMe);
         setSuccessMessage('Signed in successfully! Redirecting...');
         setTimeout(() => {
           if (onSuccess) {
@@ -155,7 +156,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
 
     try {
-      login(trimmed);
+      login(trimmed, null, null, rememberMe);
       setSuccessMessage('Developer session authenticated! Redirecting...');
       setTimeout(() => {
         if (onSuccess) {
