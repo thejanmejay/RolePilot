@@ -25,6 +25,21 @@ console = Console(file=io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", err
 JOBS_PER_PAGE = 25
 
 
+class SearchNavigationError(Exception):
+    """Raised when LinkedIn search navigation fails due to Chrome error, network error, or HTTP error."""
+    pass
+
+
+class SearchAuthError(Exception):
+    """Raised when LinkedIn search redirects to login/authwall."""
+    pass
+
+
+class SearchCheckpointError(Exception):
+    """Raised when LinkedIn search hits a security checkpoint or challenge."""
+    pass
+
+
 async def collect_search_jobs(
     page: Page,
     config: HunterConfig,
@@ -47,15 +62,92 @@ async def collect_search_jobs(
     url = build_search_url(config.search)
     log.info("Fetching search URL: %s", url)
 
-    await page.goto(url, wait_until="domcontentloaded")
+    response = None
+    goto_exception = None
+    try:
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+    except Exception as exc:
+        goto_exception = exc
+        log.error("Navigation exception during job search: %s", exc)
+
+    final_url = page.url or ""
+    try:
+        final_title = await page.title()
+    except Exception:
+        final_title = ""
+
+    resp_status = response.status if response else None
+
+    # Explicit Navigation Diagnostics (never logging cookies/tokens/auth headers)
+    diag = {
+        "search_url": url,
+        "final_url": final_url,
+        "status_code": resp_status,
+        "page_title": final_title,
+        "exception": str(goto_exception) if goto_exception else None,
+    }
+    log.info("[SEARCH-DIAG] Navigation details: %s", diag)
+
+    # 1. Chrome error page check (chrome-error://chromewebdata/, etc.)
+    is_chrome_error = (
+        "chrome-error://" in final_url
+        or "chromewebdata" in final_url
+        or (goto_exception and any(err in str(goto_exception) for err in ["net::ERR_", "ERR_TOO_MANY_REDIRECTS", "ERR_NAME_NOT_RESOLVED"]))
+    )
+    if is_chrome_error:
+        err_code = "ERR_NAVIGATION_FAILED"
+        if goto_exception and "net::" in str(goto_exception):
+            err_code = str(goto_exception).split("net::")[-1].split(" ")[0].strip()
+        else:
+            try:
+                err_code = await page.evaluate("() => document.getElementById('main-message')?.innerText?.replace(/\\s+/g, ' ') || document.title")
+            except Exception:
+                pass
+        log.error("Job search navigation reached Chrome error page: url=%s, error=%s", final_url, err_code)
+        # STOP IMMEDIATELY! Do NOT scroll!
+        raise SearchNavigationError(f"LinkedIn search page failed to load ({err_code}) at {final_url}")
+
+    # 2. Login redirect check
+    if any(x in final_url for x in ["/login", "/authwall", "/uas/login", "/signup", "checkpoint/lg/login"]):
+        log.warning("Job search redirected to login page: %s", final_url)
+        raise SearchAuthError(f"LinkedIn search redirected to login/authwall: {final_url}")
+
+    # 3. Security checkpoint check
+    if any(x in final_url for x in ["/checkpoint", "/challenge", "/security-check"]):
+        log.warning("Job search redirected to security checkpoint: %s", final_url)
+        raise SearchCheckpointError(f"LinkedIn security checkpoint detected: {final_url}")
+
+    # 4. HTTP response status error check (403, 429, 999, 500, etc.)
+    if resp_status and resp_status in [403, 429, 999, 500, 502, 503]:
+        log.error("Job search returned HTTP %d: title=%s", resp_status, final_title)
+        raise SearchNavigationError(f"LinkedIn search returned HTTP {resp_status} ({final_title})")
+
+    if goto_exception:
+        raise SearchNavigationError(f"Failed to navigate to LinkedIn search: {goto_exception}")
+
     try:
         await page.wait_for_selector(
-            "ul.scaffold-layout__list-container, div.scaffold-layout__list",
-            timeout=15000,
+            "ul.scaffold-layout__list-container, div.scaffold-layout__list, div.jobs-search-no-results-banner, div.artdeco-empty-state",
+            timeout=10000,
         )
     except Exception:
         log.warning("Job list container not found, waiting extra time...")
     await human_delay()
+
+    # Check for genuine zero results banner on an authenticated search page
+    has_zero_results_banner = False
+    try:
+        has_zero_results_banner = await page.evaluate("""() => {
+            const text = document.body ? document.body.innerText : '';
+            return /no matching jobs found|0 results|no results found/i.test(text) || !!document.querySelector('.jobs-search-no-results-banner, .artdeco-empty-state');
+        }""")
+    except Exception:
+        pass
+
+    if has_zero_results_banner:
+        log.info("[SEARCH-DIAG] Genuine zero results confirmed by LinkedIn empty-state indicator.")
+        return []
+
 
     # Diagnostic inspection of page and scrollable elements on initial load
     try:

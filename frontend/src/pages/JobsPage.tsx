@@ -4,6 +4,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
   Compass,
+  ListChecks,
 } from 'lucide-react';
 import { jobsApi } from '../api/jobs';
 import { profileApi } from '../api/profile';
@@ -15,18 +16,22 @@ import { JobCard } from '../components/jobs/JobCard';
 import { JobFilters, type FilterState } from '../components/jobs/JobFilters';
 import { JobDetailsPanel } from '../components/jobs/JobDetailsPanel';
 import { SearchConfigModal } from '../components/jobs/SearchConfigModal';
-import { EmptyState, ErrorState, ListCardSkeleton } from '../components/common';
+import { RunQueueDrawer } from '../components/jobs/RunQueueDrawer';
+import { ReviewAndRunModal } from '../components/jobs/ReviewAndRunModal';
+import { EmptyState, ErrorState, ListCardSkeleton, Button } from '../components/common';
 import {
   analyzeJobQualification,
   isJobEasyApply,
   getJobWorkMode,
 } from '../utils/jobHelpers';
 import type { Job } from '../types/job';
-import type { Profile } from '../types/profile';
+import type { Profile, Resume } from '../types/profile';
+import type { AutomationRun } from '../types/automation';
 
 interface JobsPageProps {
   onNavigateToApplications?: (applicationId?: string) => void;
   onNavigateToRun?: (runId: string) => void;
+  isActive?: boolean;
 }
 
 const defaultFilters: FilterState = {
@@ -51,10 +56,18 @@ export const JobsPage: React.FC<JobsPageProps> = ({
   const { showError, showSuccess } = useToast();
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [resumes, setResumes] = useState<Resume[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Run Queue state
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
+  const [isQueueOpen, setIsQueueOpen] = useState<boolean>(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
+  const [reviewMode, setReviewMode] = useState<'dry_run' | 'live'>('dry_run');
+  const [reviewTargetJobs, setReviewTargetJobs] = useState<Job[]>([]);
 
   // Filters state
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
@@ -71,24 +84,29 @@ export const JobsPage: React.FC<JobsPageProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const [profileData, jobsData, appsData] = await Promise.all([
+      const [profileData, jobsData, appsData, resumesData] = await Promise.all([
         profileApi.getProfile().catch(() => null),
         jobsApi.getJobs(),
         applicationsApi.getApplications().catch(() => [] as Application[]),
+        profileApi.getResumes().catch(() => [] as Resume[]),
       ]);
 
       if (profileData) setProfile(profileData);
       setJobs(jobsData);
+      setResumes(resumesData);
 
       const appMap = new Map<string, Application>();
       appsData.forEach((app) => appMap.set(app.job_id, app));
       setUserApplications(appMap);
 
       if (jobsData.length > 0) {
+        const isMobileScreen = typeof window !== 'undefined' && window.innerWidth <= 768;
         setSelectedJob((prev) => {
-          if (!prev) return jobsData[0];
-          const found = jobsData.find((j) => j.id === prev.id);
-          return found || jobsData[0];
+          if (prev) {
+            const found = jobsData.find((j) => j.id === prev.id);
+            return found || jobsData[0];
+          }
+          return isMobileScreen ? null : jobsData[0];
         });
       } else {
         setSelectedJob(null);
@@ -142,6 +160,70 @@ export const JobsPage: React.FC<JobsPageProps> = ({
       }
     } catch (err) {
       showError(formatErrorMessage(err));
+    }
+  };
+
+  const handleToggleSelectJob = (jobId: string) => {
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = (visibleJobs: Job[]) => {
+    const visibleIds = visibleJobs.map((j) => j.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedJobIds.has(id));
+
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveFromQueue = (jobId: string) => {
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      next.delete(jobId);
+      return next;
+    });
+  };
+
+  const handleClearQueue = () => {
+    setSelectedJobIds(new Set());
+    setIsQueueOpen(false);
+  };
+
+  const handleProceedToReview = (mode: 'dry_run' | 'live', targetJobs: Job[]) => {
+    setReviewMode(mode);
+    setReviewTargetJobs(targetJobs);
+    setIsQueueOpen(false);
+    setIsReviewModalOpen(true);
+  };
+
+  const handleRunStarted = (run: AutomationRun) => {
+    if (run.allow_live_submission && !run.dry_run) {
+      setSelectedJobIds((prev) => {
+        const next = new Set(prev);
+        reviewTargetJobs.forEach((j) => next.delete(j.id));
+        return next;
+      });
+    } else {
+      setSelectedJobIds(new Set());
+    }
+    setReviewTargetJobs([]);
+    setIsReviewModalOpen(false);
+    if (onNavigateToRun) {
+      onNavigateToRun(run.id);
     }
   };
 
@@ -312,6 +394,89 @@ export const JobsPage: React.FC<JobsPageProps> = ({
       <div className="jobs-page-grid">
         {/* Jobs list pane (Hidden on mobile if a job is actively selected) */}
         <div className={selectedJob ? 'desktop-only' : ''}>
+          {/* Bulk Selection and Queue Action Bar */}
+          {!isLoading && filteredJobs.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 14px',
+                backgroundColor: '#ffffff',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-light)',
+                marginBottom: '12px',
+                flexWrap: 'wrap',
+                gap: '10px',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '0.84rem',
+                    fontWeight: 600,
+                    color: 'var(--text-main)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredJobs.length > 0 &&
+                      filteredJobs.every((j) => selectedJobIds.has(j.id))
+                    }
+                    onChange={() => handleToggleSelectAll(filteredJobs)}
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      accentColor: 'var(--primary)',
+                      cursor: 'pointer',
+                    }}
+                  />
+                  <span>Select All Visible ({filteredJobs.length})</span>
+                </label>
+
+                {selectedJobIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearQueue}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Clear selection
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                  {selectedJobIds.size} queued
+                </span>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={selectedJobIds.size === 0}
+                  onClick={() => setIsQueueOpen(true)}
+                  leftIcon={<ListChecks size={14} />}
+                >
+                  Run Queue ({selectedJobIds.size})
+                </Button>
+              </div>
+            </div>
+          )}
+
           {isLoading ? (
             <ListCardSkeleton count={4} />
           ) : filteredJobs.length === 0 ? (
@@ -335,6 +500,8 @@ export const JobsPage: React.FC<JobsPageProps> = ({
                   profile={profile}
                   application={userApplications.get(job.id) || null}
                   onToggleSave={() => handleToggleSave(job.id)}
+                  isChecked={selectedJobIds.has(job.id)}
+                  onToggleCheck={() => handleToggleSelectJob(job.id)}
                 />
               ))}
             </div>
@@ -342,7 +509,7 @@ export const JobsPage: React.FC<JobsPageProps> = ({
         </div>
 
         {/* Job Details & Qualification Workspace */}
-        <div style={{ position: 'sticky', top: '80px' }}>
+        <div className={!selectedJob ? 'desktop-only' : ''} style={{ position: 'sticky', top: '80px' }}>
           <JobDetailsPanel
             job={selectedJob}
             profile={profile}
@@ -361,6 +528,76 @@ export const JobsPage: React.FC<JobsPageProps> = ({
         onClose={() => setIsConfigModalOpen(false)}
         onConfigCreated={fetchData}
       />
+
+      {/* Run Queue Drawer */}
+      <RunQueueDrawer
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        queuedJobs={jobs.filter((j) => selectedJobIds.has(j.id))}
+        onRemoveJob={handleRemoveFromQueue}
+        onClearQueue={handleClearQueue}
+        onProceedToReview={handleProceedToReview}
+      />
+
+      {/* Review & Run Modal */}
+      <ReviewAndRunModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+        queuedJobs={reviewTargetJobs}
+        mode={reviewMode}
+        profile={profile}
+        resumes={resumes}
+        onRunStarted={handleRunStarted}
+      />
+
+      {/* Sticky Floating Queue Pill (Mobile & Desktop) */}
+      {selectedJobIds.size > 0 && !isQueueOpen && !isReviewModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 900,
+            backgroundColor: 'var(--sidebar-bg)',
+            color: '#ffffff',
+            padding: '10px 18px',
+            borderRadius: 'var(--radius-full)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 600 }}>
+            <span
+              style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--primary)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+              }}
+            >
+              {selectedJobIds.size}
+            </span>
+            <span>Jobs in Queue</span>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsQueueOpen(true)}
+            leftIcon={<ListChecks size={14} />}
+            style={{ borderRadius: 'var(--radius-full)' }}
+          >
+            Open Queue
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

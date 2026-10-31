@@ -75,13 +75,21 @@ export const VerifyEmailPage: React.FC<VerifyEmailPageProps> = ({
 
   const handleSaveEmail = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput.trim() || !emailInput.includes('@')) {
+    const cleanEmail = emailInput.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
       setError('Please enter a valid email address.');
       return;
     }
-    setEmail(emailInput.trim());
+    setEmail(cleanEmail);
     setIsEditingEmail(false);
     setError(null);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.set('email', cleanEmail);
+      window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+    } catch {
+      // Ignore if history is restricted
+    }
   };
 
   return (
@@ -150,8 +158,9 @@ export const VerifyEmailPage: React.FC<VerifyEmailPageProps> = ({
               }}
               className="auth-text-link"
               style={{ fontSize: '0.8rem', marginLeft: '6px' }}
+              aria-label="Change email"
             >
-              (Change)
+              Change email
             </button>
           </div>
         )}

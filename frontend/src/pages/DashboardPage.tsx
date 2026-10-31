@@ -1,47 +1,62 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
-  Layers,
-  Send,
+  Search,
+  Eye,
   ShieldCheck,
-  TrendingUp,
+  Send,
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useProfile } from '../context/ProfileContext';
-import { formatErrorMessage } from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { formatErrorMessage, getStructuredApiError } from '../api/client';
 import { applicationsApi } from '../api/applications';
 import { automationApi } from '../api/automation';
+import { linkedinApi } from '../api/linkedin';
 import type { AutomationRun } from '../types/automation';
 import type { Application } from '../types/application';
+import type { LinkedInStatus } from '../types/linkedin';
+import { AlertTriangle } from 'lucide-react';
 
 import { ActiveRunHUD } from '../components/dashboard/ActiveRunHUD';
-import { ApplicationFunnel } from '../components/dashboard/ApplicationFunnel';
-import { ReadinessMeter } from '../components/dashboard/ReadinessMeter';
-import { QuickActionRunner } from '../components/dashboard/QuickActionRunner';
-import { RecentActivityFeed } from '../components/dashboard/RecentActivityFeed';
+import { DashboardMetricCard } from '../components/dashboard/DashboardMetricCard';
+import { ProfileReadinessCard } from '../components/dashboard/ProfileReadinessCard';
+import { ApplicationPipelineCard } from '../components/dashboard/ApplicationPipelineCard';
+import { QuickActionsCard } from '../components/dashboard/QuickActionsCard';
+import { RecentActivityTable } from '../components/dashboard/RecentActivityTable';
+import { TodayAutomationRunCard } from '../components/dashboard/TodayAutomationRunCard';
 import { LinkedInStatusCard } from '../components/linkedin/LinkedInStatusCard';
 import { LinkedInConsentModal } from '../components/linkedin/LinkedInConsentModal';
-import { Skeleton, ErrorState } from '../components/common';
+import { ErrorState } from '../components/common';
+import { ExtensionPromotion } from '../components/extension/ExtensionPromotion';
+import { useNavigation } from '../context/NavigationContext';
 
 interface DashboardPageProps {
   onNavigateTab: (tab: 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation') => void;
   onNavigateToRun?: (runId: string) => void;
   onNavigateToApplication?: (applicationId?: string) => void;
+  isActive?: boolean;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   onNavigateTab,
   onNavigateToRun,
   onNavigateToApplication,
+  isActive = true,
 }) => {
-  const { isAuthenticated, email } = useAuth();
+  const { isAuthenticated, email, user } = useAuth();
+  const { navigate } = useNavigation();
   const { profile, resumes, searchConfigs, refreshProfile } = useProfile();
+  const { showSuccess, showError } = useToast();
+  const prevActiveRef = useRef<boolean>(isActive);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [applications, setApplications] = useState<Application[]>([]);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [linkedInStatus, setLinkedInStatus] = useState<LinkedInStatus | null>(null);
   const [isLinkedInConsentOpen, setIsLinkedInConsentOpen] = useState<boolean>(false);
   const [statusRefreshKey, setStatusRefreshKey] = useState<number>(0);
 
@@ -50,14 +65,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     setError(null);
 
     try {
-      const [appsData, runsData] = await Promise.all([
+      const [appsData, runsData, statusData] = await Promise.all([
         applicationsApi.getApplications().catch(() => []),
         automationApi.getRuns().catch(() => []),
+        linkedinApi.getStatus().catch(() => null),
         refreshProfile(true),
       ]);
 
       setApplications(appsData);
       setRuns(runsData);
+      if (statusData) setLinkedInStatus(statusData);
     } catch (err) {
       if (!isBackground) {
         setError(formatErrorMessage(err));
@@ -73,31 +90,49 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     }
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (isActive && !prevActiveRef.current && isAuthenticated) {
+      fetchDashboardData(true);
+    }
+    prevActiveRef.current = isActive;
+  }, [isActive, isAuthenticated]);
+
   // Find active or queued run
   const activeRun = runs.find((r) => r.status === 'running' || r.status === 'queued') || null;
 
-  // Compute metrics
+  // Real KPI calculations from persisted API data
   const totalApplications = applications.length;
-  const liveSubmitted = applications.filter((a) => a.status === 'applied' || a.status === 'submitted').length;
-  const dryRunCompleted = applications.filter((a) => a.status === 'dry_run_completed').length;
+  const liveSubmitted = applications.filter(
+    (a) => a.status === 'applied' || a.status === 'submitted'
+  ).length;
+  const dryRunCompleted = applications.filter(
+    (a) => a.status === 'dry_run_completed' || a.status === 'verified'
+  ).length;
+
   const totalJobsFound = runs.reduce((acc, r) => acc + (r.jobs_found || 0), 0);
   const totalJobsProcessed = runs.reduce((acc, r) => acc + (r.jobs_processed || 0), 0);
 
-  // Success rate: percentage of processed jobs that completed dry-run review or live submit
-  const successfulApplications = liveSubmitted + dryRunCompleted;
-  const successRate = totalJobsProcessed > 0
-    ? `${Math.round((successfulApplications / totalJobsProcessed) * 100)}%`
-    : totalApplications > 0
-    ? '100%'
-    : '—';
+  // If newly signed up candidate has 0 runs, display 0 or the real discovered jobs count
+  const displayJobsDiscovered = totalJobsFound > 0 ? totalJobsFound : totalApplications;
+  const displayFormsEvaluated = totalJobsProcessed > 0 ? totalJobsProcessed : dryRunCompleted + liveSubmitted;
 
   const activeSearchConfig = searchConfigs.find((c) => c.is_active) || searchConfigs[0] || null;
 
+  const isLinkedInExpiredOrDisconnected = Boolean(
+    linkedInStatus &&
+    (!linkedInStatus.is_connected ||
+      linkedInStatus.status === 'expired' ||
+      linkedInStatus.status === 'error' ||
+      !linkedInStatus.has_consent)
+  );
+
   const candidateName = profile?.first_name
     ? `${profile.first_name}${profile.last_name ? ` ${profile.last_name}` : ''}`
-    : email?.split('@')[0] || 'Candidate';
+    : email
+    ? email.split('@')[0]
+    : 'Janmejay Singh';
 
-  // Formatted date string matching executive design
+  // Formatted date string matching visual reference e.g. "Wed, Oct 28, 2026 · 2:20 AM"
   const formattedDateStr = new Intl.DateTimeFormat('en-US', {
     weekday: 'short',
     day: 'numeric',
@@ -108,9 +143,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     hour12: true,
   }).format(new Date()).replace(/, ([0-9]{4})/, ' $1 ·');
 
+  const handleLaunchSafeDryRun = async () => {
+    setIsTriggering(true);
+    try {
+      // Safety Gate: LinkedIn connection & consent check
+      const statusData = await linkedinApi.getStatus().catch(() => null);
+      if (!statusData?.is_connected || !statusData?.has_consent || statusData?.status === 'expired') {
+        setIsLinkedInConsentOpen(true);
+        setIsTriggering(false);
+        return;
+      }
+
+      await automationApi.createRun({
+        search_config_id: activeSearchConfig?.id,
+        dry_run: true,
+        max_jobs: 5,
+      });
+
+      showSuccess('Safe Dry-Run automation triggered successfully (5 jobs, no live submission).');
+      fetchDashboardData(true);
+      setStatusRefreshKey((k) => k + 1);
+      onNavigateTab('automation');
+    } catch (err) {
+      const struct = getStructuredApiError(err);
+      const isExpired =
+        struct?.errorCode === 'LINKEDIN_SESSION_EXPIRED' ||
+        struct?.errorCode === 'LINKEDIN_SESSION_INVALID' ||
+        struct?.errorCode === 'LINKEDIN_SESSION_MISSING' ||
+        formatErrorMessage(err).toLowerCase().includes('session');
+      if (isExpired) {
+        showError(struct?.message || 'LinkedIn session expired. Please reconnect your LinkedIn account to continue.');
+        setIsLinkedInConsentOpen(true);
+      } else {
+        showError(struct?.message || formatErrorMessage(err));
+      }
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
   return (
-    <div className="dashboard-content">
-      {/* Header Bar */}
+    <div className="dashboard-content" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+      {/* Top Header Row */}
       <div
         style={{
           display: 'flex',
@@ -118,39 +192,50 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: '16px',
-          marginBottom: '24px',
         }}
       >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h1 style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-              Welcome back, {candidateName} 👋
-            </h1>
-          </div>
-          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Executive automation control center and job application tracking overview
+          <h1
+            style={{
+              fontSize: '1.65rem',
+              fontWeight: 800,
+              color: 'var(--text-main)',
+              letterSpacing: '-0.02em',
+              margin: 0,
+            }}
+          >
+            Welcome back, {candidateName} 👋
+          </h1>
+          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>
+            Let's keep your job search on track. Here's what's happening with your applications and automation.
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
+          <span style={{ fontSize: '0.82rem', color: '#64748B', fontWeight: 600 }}>
             {formattedDateStr}
           </span>
           <button
+            type="button"
             onClick={() => fetchDashboardData()}
             disabled={isLoading}
-            className="btn btn-primary"
+            className="btn btn-outline"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              fontSize: '0.85rem',
-              padding: '8px 16px',
-              minHeight: '38px',
-              borderRadius: '9999px',
+              fontSize: '0.84rem',
+              padding: '7px 16px',
+              minHeight: '36px',
+              borderRadius: '8px',
+              background: '#FFFFFF',
+              borderColor: 'var(--border)',
+              color: 'var(--text-main)',
+              fontWeight: 600,
+              cursor: 'pointer',
             }}
           >
-            <RefreshCw size={15} className={isLoading ? 'spin-animation' : ''} />
+            <RefreshCw size={14} className={isLoading ? 'spin-animation' : ''} />
             <span>Refresh Data</span>
           </button>
         </div>
@@ -158,7 +243,58 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {error && <ErrorState message={error} onRetry={() => fetchDashboardData()} />}
 
-      {/* Active Run HUD Banner */}
+      {/* LinkedIn Session-Expired Blocker Banner */}
+      {isLinkedInExpiredOrDisconnected && (
+        <div
+          role="alert"
+          style={{
+            padding: '16px 20px',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'var(--warning-bg)',
+            border: '1px solid var(--warning-border)',
+            color: '#92400E',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <AlertTriangle size={22} color="#D97706" style={{ flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
+                LinkedIn Session Expired or Disconnected
+              </div>
+              <div style={{ fontSize: '0.84rem', marginTop: '2px', color: '#78350F' }}>
+                Automated job search, extraction, and dry-run testing require an active LinkedIn connection. Reconnect your session to resume.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setIsLinkedInConsentOpen(true)}
+              className="btn btn-primary btn-sm"
+              style={{ minHeight: '36px' }}
+            >
+              <RefreshCw size={14} />
+              <span>Reconnect LinkedIn</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ExtensionPromotion
+        key={user?.id || profile?.id || 'profile-loading'}
+        placement="dashboard"
+        isAuthenticated={isAuthenticated}
+        onboardingComplete={Boolean(profile?.onboarding_completed)}
+        accountId={user?.id || profile?.id}
+        onContinueOnboarding={() => navigate('/onboarding')}
+      />
+
+      {/* Active Run HUD (when run is running/queued) */}
       <ActiveRunHUD
         activeRun={activeRun}
         onNavigateToRun={(runId) => {
@@ -170,225 +306,103 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         }}
       />
 
-      {/* Top 4 Metrics Cards (Reflowable) */}
-      <div className="stat-grid" style={{ marginBottom: '24px' }}>
-        {/* Card 1: Total Applications */}
-        <div className="card stat-card" onClick={() => onNavigateTab('applications')} style={{ cursor: 'pointer' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              Applications Tracked
-            </span>
-            <div
-              style={{
-                backgroundColor: 'var(--primary-light)',
-                color: 'var(--primary)',
-                padding: '8px',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Layers size={18} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              {isLoading ? <Skeleton height={28} width={60} /> : totalApplications}
-            </div>
-            <span
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                color: '#16a34a',
-                backgroundColor: '#dcfce7',
-                padding: '2px 8px',
-                borderRadius: '9999px',
-              }}
-            >
-              + 50%
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            All discovered and submitted records
-          </div>
-        </div>
-
-        {/* Card 2: Dry Runs Completed */}
-        <div className="card stat-card" onClick={() => onNavigateTab('automation')} style={{ cursor: 'pointer' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              Dry Runs Verified
-            </span>
-            <div
-              style={{
-                backgroundColor: '#eff6ff',
-                color: '#3b82f6',
-                padding: '8px',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <ShieldCheck size={18} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              {isLoading ? <Skeleton height={28} width={60} /> : dryRunCompleted}
-            </div>
-            <span
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                color: '#64748b',
-                backgroundColor: '#f1f5f9',
-                padding: '2px 8px',
-                borderRadius: '9999px',
-              }}
-            >
-              0%
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Safely validated without submit
-          </div>
-        </div>
-
-        {/* Card 3: Live Submissions */}
-        <div className="card stat-card" onClick={() => onNavigateTab('applications')} style={{ cursor: 'pointer' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              Live Submissions
-            </span>
-            <div
-              style={{
-                backgroundColor: '#fef3c7',
-                color: '#f59e0b',
-                padding: '8px',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Send size={18} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              {isLoading ? <Skeleton height={28} width={60} /> : liveSubmitted}
-            </div>
-            <span
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                color: '#16a34a',
-                backgroundColor: '#dcfce7',
-                padding: '2px 8px',
-                borderRadius: '9999px',
-              }}
-            >
-              + 100%
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Triple-Key confirmed on LinkedIn
-          </div>
-        </div>
-
-        {/* Card 4: Success Conversion */}
-        <div className="card stat-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              Execution Success Rate
-            </span>
-            <div
-              style={{
-                backgroundColor: '#f3e8ff',
-                color: '#a855f7',
-                padding: '8px',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <TrendingUp size={18} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              {isLoading ? <Skeleton height={28} width={60} /> : successRate}
-            </div>
-            <span
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                color: '#16a34a',
-                backgroundColor: '#dcfce7',
-                padding: '2px 8px',
-                borderRadius: '9999px',
-              }}
-            >
-              + 5%
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Verified completions vs attempts
-          </div>
-        </div>
-      </div>
-
-      {/* Application Readiness Meter */}
-      <div style={{ marginBottom: '24px' }}>
-        <ReadinessMeter
-          profile={profile}
-          resumes={resumes}
-          searchConfigs={searchConfigs}
-          onNavigateTab={onNavigateTab}
+      {/* 1. Four KPI Metric Cards */}
+      <div className="stat-grid">
+        <DashboardMetricCard
+          title="Jobs Discovered"
+          value={displayJobsDiscovered}
+          icon={Search}
+          iconColor="#0284C7"
+          iconBg="#E0F2FE"
+          trendLabel="All Records"
+          isLoading={isLoading}
+          onClick={() => onNavigateTab('jobs')}
+        />
+        <DashboardMetricCard
+          title="Forms Evaluated"
+          value={displayFormsEvaluated}
+          icon={Eye}
+          iconColor="#9333EA"
+          iconBg="#F3E8FF"
+          trendLabel="Simulated"
+          isLoading={isLoading}
+          onClick={() => onNavigateTab('automation')}
+        />
+        <DashboardMetricCard
+          title="Dry Runs Verified"
+          value={dryRunCompleted}
+          icon={ShieldCheck}
+          iconColor="#1769C2"
+          iconBg="#DBEAFE"
+          trendLabel="Triple-Key"
+          isLoading={isLoading}
+          onClick={() => onNavigateTab('automation')}
+        />
+        <DashboardMetricCard
+          title="Live Submissions"
+          value={liveSubmitted}
+          icon={Send}
+          iconColor="#16A34A"
+          iconBg="#DCFCE7"
+          trendLabel="Completion"
+          isLoading={isLoading}
+          onClick={() => onNavigateTab('applications')}
         />
       </div>
 
-      {/* Application Funnel */}
-      <ApplicationFunnel
-        stats={{
-          jobsFound: totalJobsFound > 0 ? totalJobsFound : totalApplications + 15,
-          jobsProcessed: totalJobsProcessed > 0 ? totalJobsProcessed : totalApplications,
-          dryRunVerified: dryRunCompleted,
-          submittedConfirmed: liveSubmitted,
-        }}
-      />
+      {/* 2. Middle Row: Profile Readiness (Left) | Application Pipeline (Center) | Quick Actions (Right) */}
+      <div className="dashboard-middle-grid">
+        <ProfileReadinessCard
+          profile={profile}
+          resumes={resumes}
+          searchConfigs={searchConfigs}
+          onNavigateProfile={() => onNavigateTab('profile')}
+        />
 
-      {/* Two Column Section: Recent Activity & Applications (Left) + LinkedIn Connection & Quick Action Runner (Right) */}
-      <div className="dashboard-two-col" style={{ marginBottom: '24px' }}>
+        <ApplicationPipelineCard
+          jobsDiscovered={displayJobsDiscovered}
+          formsEvaluated={displayFormsEvaluated}
+          dryRunsVerified={dryRunCompleted}
+          liveSubmissions={liveSubmitted}
+        />
+
+        <QuickActionsCard
+          onRunDryRun={handleLaunchSafeDryRun}
+          onNavigateJobs={() => onNavigateTab('jobs')}
+          onNavigateApplications={() => onNavigateTab('applications')}
+          onNavigateAutomation={() => onNavigateTab('automation')}
+          onRequireLinkedInConsent={() => setIsLinkedInConsentOpen(true)}
+          isTriggering={isTriggering}
+        />
+      </div>
+
+      {/* 3. Bottom Row: Recent Activity & Applications (Left ~65%) | LinkedIn Integration & Today's Run (Right ~35%) */}
+      <div className="dashboard-bottom-grid">
+        {/* Left Column: Recent Activity Table */}
         <div>
-          <RecentActivityFeed
+          <RecentActivityTable
             applications={applications}
-            onNavigateToApplications={() => onNavigateTab('applications')}
-            onNavigateToApplication={onNavigateToApplication}
+            onNavigateApplications={() => onNavigateTab('applications')}
+            onNavigateApplication={onNavigateToApplication}
           />
         </div>
 
+        {/* Right Column: Stacked LinkedIn Integration + Today's Automation Run */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <LinkedInStatusCard
             onOpenConnectModal={() => setIsLinkedInConsentOpen(true)}
             statusRefreshKey={statusRefreshKey}
           />
 
-          <QuickActionRunner
+          <TodayAutomationRunCard
             activeSearchConfig={activeSearchConfig}
-            onNavigateTab={onNavigateTab}
-            onRunTriggered={() => {
-              fetchDashboardData(true);
-              setStatusRefreshKey((k) => k + 1);
-            }}
-            onRequireLinkedInConsent={() => setIsLinkedInConsentOpen(true)}
+            onLaunchDryRun={handleLaunchSafeDryRun}
+            isTriggering={isTriggering}
           />
         </div>
       </div>
 
+      {/* LinkedIn Consent Modal */}
       <LinkedInConsentModal
         isOpen={isLinkedInConsentOpen}
         onClose={() => setIsLinkedInConsentOpen(false)}

@@ -28,6 +28,8 @@ interface JobCardProps {
   profile: Profile | null;
   application?: Application | null;
   onToggleSave?: (e: React.MouseEvent) => void;
+  isChecked?: boolean;
+  onToggleCheck?: (e: React.MouseEvent | React.ChangeEvent) => void;
 }
 
 export const JobCard: React.FC<JobCardProps> = ({
@@ -37,6 +39,8 @@ export const JobCard: React.FC<JobCardProps> = ({
   profile,
   application,
   onToggleSave,
+  isChecked = false,
+  onToggleCheck,
 }) => {
   const qualification = analyzeJobQualification(job, profile);
   const salaryStr = formatSalary(job.salary_min, job.salary_max);
@@ -64,17 +68,45 @@ export const JobCard: React.FC<JobCardProps> = ({
         padding: '16px',
         marginBottom: '12px',
         cursor: 'pointer',
-        border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-color)',
+        border: isChecked
+          ? '2px solid var(--primary)'
+          : isSelected
+          ? '2px solid var(--primary-border)'
+          : '1px solid var(--border-color)',
         borderRadius: 'var(--radius-md)',
-        boxShadow: isSelected ? '0 4px 12px rgba(37, 99, 235, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+        boxShadow: isChecked
+          ? '0 4px 12px rgba(23, 105, 194, 0.15)'
+          : isSelected
+          ? '0 4px 12px rgba(37, 99, 235, 0.08)'
+          : '0 1px 3px rgba(0,0,0,0.03)',
         transition: 'all 0.15s ease',
-        backgroundColor: isSelected ? '#f8fafc' : '#ffffff',
+        backgroundColor: isChecked ? '#f0f7ff' : isSelected ? '#f8fafc' : '#ffffff',
         position: 'relative',
         outline: 'none',
       }}
     >
-      {/* Top Header: Company Avatar + Title + Bookmark */}
+      {/* Top Header: Checkbox + Company Avatar + Title + Bookmark */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
+        {onToggleCheck && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: 'flex', alignItems: 'center', paddingTop: '4px' }}
+          >
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={(e) => onToggleCheck(e)}
+              aria-label={`Select ${job.title} for queue`}
+              style={{
+                width: '18px',
+                height: '18px',
+                cursor: 'pointer',
+                accentColor: 'var(--primary)',
+              }}
+            />
+          </div>
+        )}
+
         <CompanyAvatar name={job.company} size="md" />
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -91,11 +123,14 @@ export const JobCard: React.FC<JobCardProps> = ({
                 fontSize: '0.98rem',
                 fontWeight: 700,
                 color: 'var(--text-main)',
-                margin: '0 0 2px 0',
-                lineHeight: 1.3,
+                margin: '0 0 4px 0',
+                lineHeight: 1.35,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                wordBreak: 'break-word',
               }}
             >
               {job.title}

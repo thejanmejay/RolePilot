@@ -195,15 +195,24 @@ def test_jobs_and_application_isolation(auth_headers_user_a, auth_headers_user_b
 # ==========================================
 
 def test_automation_run_creation_and_logs(auth_headers_user_a, auth_headers_user_b, monkeypatch):
+    from unittest.mock import AsyncMock, patch
+    from backend.app.services.linkedin_session_validator import PreflightValidationResult
+
     monkeypatch.setattr(
         "backend.app.api.automation.run_linkedin_automation_task",
         lambda *args, **kwargs: None,
     )
+    client.post("/api/v1/linkedin/consent", json={"accepted": True}, headers=auth_headers_user_a)
     run_payload = {
         "dry_run": True,
         "max_jobs": 10,
     }
-    res = client.post("/api/v1/automation/runs", json=run_payload, headers=auth_headers_user_a)
+    with patch(
+        "backend.app.services.linkedin_session_validator.LinkedInSessionValidator.validate_session",
+        new_callable=AsyncMock,
+        return_value=PreflightValidationResult(is_valid=True, cookies=[{"name": "li_at", "value": "test-cookie"}]),
+    ), patch("backend.app.workers.queue_worker.QueueWorker.process_run_by_id"):
+        res = client.post("/api/v1/automation/runs", json=run_payload, headers=auth_headers_user_a)
     assert res.status_code == 201
     run_data = res.json()
     run_id = run_data["id"]

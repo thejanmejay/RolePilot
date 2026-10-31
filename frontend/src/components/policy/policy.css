@@ -103,10 +103,11 @@
   justify-content: center;
   gap: 8px;
   padding: 11px 24px;
+  min-height: 44px;
   font-size: 0.925rem;
   font-weight: 600;
-  border-radius: 8px;
-  background-color: #0A66C2;
+  border-radius: var(--radius-md, 10px);
+  background-color: var(--primary, #1769C2);
   color: #FFFFFF;
   border: none;
   cursor: pointer;
@@ -114,7 +115,7 @@
 }
 
 .policy-btn-accept:hover:not(:disabled) {
-  background-color: #084e96;
+  background-color: var(--primary-hover, #1257A5);
 }
 
 .policy-btn-accept:disabled {

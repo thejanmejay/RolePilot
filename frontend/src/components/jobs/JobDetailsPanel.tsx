@@ -110,12 +110,9 @@ export const JobDetailsPanel: React.FC<JobDetailsPanelProps> = ({
 
   return (
     <div
-      className="card"
+      className="card detail-pane-scroll"
       style={{
         padding: '24px',
-        height: 'fit-content',
-        maxHeight: 'calc(100vh - 100px)',
-        overflowY: 'auto',
         border: '1px solid var(--border-color)',
         borderRadius: 'var(--radius-lg)',
         boxShadow: 'var(--shadow-md)',

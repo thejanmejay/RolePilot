@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   UserPlus,
-  CheckCircle,
   AlertCircle,
   Loader2,
 } from 'lucide-react';
@@ -12,6 +11,7 @@ import { PasswordField } from '../components/auth/PasswordField';
 // import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
 import { authService } from '../services/authService';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 interface SignupPageProps {
   onNavigateLogin: () => void;
@@ -21,6 +21,7 @@ interface SignupPageProps {
   onNavigateVerifyEmail: (email: string) => void;
   onNavigateTerms?: () => void;
   onNavigatePrivacy?: () => void;
+  onNavigateSupport?: () => void;
 }
 
 export const SignupPage: React.FC<SignupPageProps> = ({
@@ -31,8 +32,10 @@ export const SignupPage: React.FC<SignupPageProps> = ({
   onNavigateVerifyEmail,
   onNavigateTerms,
   onNavigatePrivacy,
+  onNavigateSupport,
 }) => {
   const { login } = useAuth();
+  const { showSuccess } = useToast();
 
   // Form fields state
   const [fullName, setFullName] = useState('');
@@ -48,7 +51,8 @@ export const SignupPage: React.FC<SignupPageProps> = ({
   // Submission & status states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isDeletedAccount, setIsDeletedAccount] = useState(false);
+
 
   const validateField = (field: string, value: string): string => {
     switch (field) {
@@ -144,6 +148,9 @@ export const SignupPage: React.FC<SignupPageProps> = ({
 
     setIsSubmitting(true);
 
+    setGeneralError(null);
+    setIsDeletedAccount(false);
+
     try {
       const res = await authService.signUp({
         fullName: fullName.trim(),
@@ -152,25 +159,26 @@ export const SignupPage: React.FC<SignupPageProps> = ({
       });
 
       if (!res.success) {
-        setGeneralError(res.error || 'Registration failed. Please try again.');
+        const errorMsg = res.error || 'Registration failed. Please try again.';
+        setGeneralError(errorMsg);
+        if (res.isDeletedAccount || errorMsg.includes('previously deleted')) {
+          setIsDeletedAccount(true);
+        }
         setIsSubmitting(false);
         return;
       }
 
       if (res.requiresEmailVerification) {
-        setSuccessMessage(
-          "Please check your email and confirm your identity. If your account does not exist, you will receive the email. If your account already exists, please click on Log in."
-        );
-        setIsSubmitting(false);
+        showSuccess('Verification email sent! Redirecting you to email verification...', 4000);
         setTimeout(() => {
           onNavigateVerifyEmail(email.trim());
-        }, 3000);
+        }, 1500);
         return;
       }
 
       if (res.token) {
         login(res.token, res.session, res.user);
-        setSuccessMessage('Account created successfully! Redirecting...');
+        showSuccess('Account created successfully! Redirecting...', 3000);
         setTimeout(() => {
           if (onSuccess) {
             onSuccess();
@@ -180,7 +188,11 @@ export const SignupPage: React.FC<SignupPageProps> = ({
         }, 600);
       }
     } catch (err: any) {
-      setGeneralError(err.message || 'An unexpected error occurred during signup.');
+      const msg = err.message || 'An unexpected error occurred during signup.';
+      setGeneralError(msg);
+      if (typeof msg === 'string' && msg.includes('previously deleted')) {
+        setIsDeletedAccount(true);
+      }
       setIsSubmitting(false);
     }
   };
@@ -202,44 +214,47 @@ export const SignupPage: React.FC<SignupPageProps> = ({
 
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
         {generalError && (
-          <div role="alert" className="auth-alert auth-alert-error">
-            <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>{generalError}</div>
-          </div>
-        )}
-
-        {successMessage && (
           <div
-            role="status"
-            className="auth-alert auth-alert-success"
-            style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+            role="alert"
+            className="auth-alert auth-alert-error"
+            style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-              <CheckCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
-              <div style={{ fontWeight: 500, lineHeight: 1.5 }}>{successMessage}</div>
+              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ lineHeight: 1.5 }}>{generalError}</div>
             </div>
-            {successMessage.includes('confirm your identity') && (
-              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+            {isDeletedAccount && (
+              <div style={{ paddingLeft: '26px' }}>
                 <button
                   type="button"
-                  onClick={onNavigateLogin}
-                  className="auth-btn-secondary"
-                  style={{ height: '32px', fontSize: '0.8rem', padding: '0 12px' }}
+                  id="contact-support-btn"
+                  onClick={() => {
+                    if (onNavigateSupport) {
+                      onNavigateSupport();
+                    } else {
+                      window.location.href = '/support';
+                    }
+                  }}
+                  className="btn btn-outline"
+                  style={{
+                    height: '32px',
+                    fontSize: '0.82rem',
+                    padding: '0 12px',
+                    color: 'var(--danger)',
+                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                    backgroundColor: '#ffffff',
+                    fontWeight: 600,
+                  }}
                 >
-                  Click here to Log in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigateVerifyEmail(email.trim())}
-                  className="auth-text-link"
-                  style={{ fontSize: '0.8rem' }}
-                >
-                  Go to verification screen →
+                  Contact Support
                 </button>
               </div>
             )}
           </div>
         )}
+
+
+
 
         <FormField
           id="signup-fullname"

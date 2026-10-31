@@ -406,6 +406,8 @@ async def test_invalid_session_fails_run_immediately():
     mock_run.user_id = uuid.uuid4()
     mock_run.status = "queued"
     mock_run.search_config = None
+    mock_run.search_overrides = None
+    mock_run.selected_synced_job_ids = None
     mock_run.applications_submitted = 0
 
     mock_profile = MagicMock()
@@ -463,10 +465,13 @@ async def test_invalid_session_fails_run_immediately():
     mock_db.execute.side_effect = mock_execute
 
     with patch("backend.app.workers.linkedin_worker.SessionLocal", return_value=mock_db):
-        with patch("linkedin_hunter.auth.session.load_cookies", return_value=None):
-            with patch("linkedin_hunter.auth.session.has_valid_session", return_value=False):
-                with patch("backend.app.services.automation_service.AutomationService.log_event") as mock_log:
-                    await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
+        with patch("backend.app.services.linkedin_session_validator.LinkedInSessionValidator.validate_session", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = MagicMock(is_valid=False, error_code="LINKEDIN_SESSION_INVALID", error_title="LinkedIn session expired", error_message="LinkedIn session authentication failed: session expired")
+            with patch("backend.app.services.browser_diagnostics.verify_browser_runtime", return_value={"available": True}):
+                with patch("linkedin_hunter.auth.session.load_cookies", return_value=None):
+                    with patch("linkedin_hunter.auth.session.has_valid_session", return_value=False):
+                        with patch("backend.app.services.automation_service.AutomationService.log_event") as mock_log:
+                            await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
 
                 # Status must be failed
                 assert mock_run.status == "failed"
@@ -493,6 +498,11 @@ def test_real_linkedin_job_url_validation():
     assert is_valid_real_linkedin_job_url("https://example.com/job/123") is False
     assert is_valid_real_linkedin_job_url("http://localhost:8000/jobs/1") is False
     assert is_valid_real_linkedin_job_url("https://www.linkedin.com/jobs/view/mock-job-55") is False
+    assert is_valid_real_linkedin_job_url("https://linkedin.com.evil.test/jobs/view/1234567890") is False
+    assert is_valid_real_linkedin_job_url("https://www.linkedin.com.evil.test/jobs/view/1234567890") is False
+    assert is_valid_real_linkedin_job_url("http://www.linkedin.com/jobs/view/1234567890") is False
+    assert is_valid_real_linkedin_job_url("https://user@www.linkedin.com/jobs/view/1234567890") is False
+    assert is_valid_real_linkedin_job_url("https://www.linkedin.com:444/jobs/view/1234567890") is False
     assert is_valid_real_linkedin_job_url("") is False
     assert is_valid_real_linkedin_job_url(None) is False
 
@@ -508,6 +518,8 @@ async def test_dry_run_application_state_semantics():
     mock_run.user_id = uuid.uuid4()
     mock_run.status = "queued"
     mock_run.search_config = None
+    mock_run.search_overrides = None
+    mock_run.selected_synced_job_ids = None
     mock_run.jobs_found = 0
     mock_run.jobs_processed = 0
     mock_run.applications_submitted = 0
@@ -588,35 +600,38 @@ async def test_dry_run_application_state_semantics():
     }
 
     with patch("backend.app.workers.linkedin_worker.SessionLocal", return_value=mock_db):
-        with patch("linkedin_hunter.auth.session.has_valid_session", return_value=True):
-            with patch("linkedin_hunter.auth.session.load_cookies", return_value=[{"name": "li_at", "value": "123"}]):
-                with patch("linkedin_hunter.auth.session.check_session_health", new_callable=AsyncMock) as mock_health:
-                    mock_health.return_value = {"authenticated": True, "details": "Verified"}
-                    with patch("linkedin_hunter.browser.engine.BrowserEngine.launch", new_callable=AsyncMock) as mock_launch:
-                        mock_launch.return_value = AsyncMock()
-                        with patch("linkedin_hunter.browser.engine.BrowserEngine.load_cookies", new_callable=AsyncMock):
-                            with patch("linkedin_hunter.browser.engine.BrowserEngine.close", new_callable=AsyncMock) as mock_close:
-                                with patch("linkedin_hunter.jobs.apply.execute_single_job_playwright_apply", new_callable=AsyncMock) as mock_apply:
-                                    mock_apply.return_value = playwright_return
-                                    with patch("backend.app.services.application_service.ApplicationService.record_application") as mock_record_app:
-                                        mock_app_rec = MagicMock()
-                                        mock_app_rec.id = uuid.uuid4()
-                                        mock_record_app.return_value = mock_app_rec
+        with patch("backend.app.services.linkedin_session_validator.LinkedInSessionValidator.validate_session", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = MagicMock(is_valid=True, cookies=[{"name": "li_at", "value": "mock-cookie"}])
+            with patch("backend.app.services.browser_diagnostics.verify_browser_runtime", return_value={"available": True}):
+                with patch("linkedin_hunter.auth.session.has_valid_session", return_value=True):
+                    with patch("linkedin_hunter.auth.session.load_cookies", return_value=[{"name": "li_at", "value": "mock-cookie"}]):
+                        with patch("linkedin_hunter.auth.session.check_session_health", new_callable=AsyncMock) as mock_health:
+                            mock_health.return_value = {"authenticated": True, "details": "Verified"}
+                            with patch("linkedin_hunter.browser.engine.BrowserEngine.launch", new_callable=AsyncMock) as mock_launch:
+                                mock_launch.return_value = AsyncMock()
+                                with patch("linkedin_hunter.browser.engine.BrowserEngine.load_cookies", new_callable=AsyncMock):
+                                    with patch("linkedin_hunter.browser.engine.BrowserEngine.close", new_callable=AsyncMock) as mock_close:
+                                        with patch("linkedin_hunter.jobs.apply.execute_single_job_playwright_apply", new_callable=AsyncMock) as mock_apply:
+                                            mock_apply.return_value = playwright_return
+                                            with patch("backend.app.services.application_service.ApplicationService.record_application") as mock_record_app:
+                                                mock_app_rec = MagicMock()
+                                                mock_app_rec.id = uuid.uuid4()
+                                                mock_app_rec.attempt_count = 0
+                                                mock_record_app.return_value = mock_app_rec
 
-                                        await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
+                                                await execute_automation_run(mock_run.id, mock_run.user_id, dry_run=True, max_jobs=1)
 
-                                        # Verify applications_submitted is strictly 0
-                                        assert mock_run.applications_submitted == 0
-                                        assert mock_run.jobs_processed == 1
-                                        assert mock_run.status == "completed"
+                                                # Verify applications_submitted is strictly 0
+                                                assert mock_run.applications_submitted == 0
+                                                assert mock_run.jobs_processed == 1
+                                                assert mock_run.status == "completed"
 
-                                        # Verify Application record was created with status="dry_run_blocked"
-                                        mock_record_app.assert_called_once()
-                                        _, call_kwargs = mock_record_app.call_args
-                                        assert call_kwargs["status"] == "dry_run_blocked"
+                                                # Verify Application record was created with status="dry_run_blocked"
+                                                assert mock_record_app.call_count == 2
+                                                assert mock_record_app.call_args_list[-1][1]["status"] == "dry_run_blocked"
 
-                                        # Verify browser engine closed
-                                        mock_close.assert_called_once()
+                                                # Verify browser engine closed
+                                                mock_close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -796,6 +811,8 @@ async def test_ambiguous_submission_does_not_increment_counter_or_retry():
     mock_run.user_id = uuid.uuid4()
     mock_run.status = "queued"
     mock_run.search_config = None
+    mock_run.search_overrides = None
+    mock_run.selected_synced_job_ids = None
     mock_run.jobs_found = 0
     mock_run.jobs_processed = 0
     mock_run.applications_submitted = 0
@@ -876,35 +893,39 @@ async def test_ambiguous_submission_does_not_increment_counter_or_retry():
     }
 
     with patch("backend.app.workers.linkedin_worker.SessionLocal", return_value=mock_db):
-        with patch("linkedin_hunter.auth.session.has_valid_session", return_value=True):
-            with patch("linkedin_hunter.auth.session.load_cookies", return_value=[{"name": "li_at", "value": "123"}]):
-                with patch("linkedin_hunter.auth.session.check_session_health", new_callable=AsyncMock) as mock_health:
-                    mock_health.return_value = {"authenticated": True, "details": "Verified"}
-                    with patch("linkedin_hunter.browser.engine.BrowserEngine.launch", new_callable=AsyncMock) as mock_launch:
-                        mock_launch.return_value = AsyncMock()
-                        with patch("linkedin_hunter.browser.engine.BrowserEngine.load_cookies", new_callable=AsyncMock):
-                            with patch("linkedin_hunter.browser.engine.BrowserEngine.close", new_callable=AsyncMock) as mock_close:
-                                with patch("linkedin_hunter.jobs.apply.execute_single_job_playwright_apply", new_callable=AsyncMock) as mock_apply:
-                                    mock_apply.return_value = ambiguous_return
-                                    with patch("backend.app.services.application_service.ApplicationService.record_application") as mock_record_app:
-                                        mock_app_rec = MagicMock()
-                                        mock_app_rec.id = uuid.uuid4()
-                                        mock_record_app.return_value = mock_app_rec
+        with patch("backend.app.services.linkedin_session_validator.LinkedInSessionValidator.validate_session", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = MagicMock(is_valid=True, cookies=[{"name": "li_at", "value": "mock-cookie"}])
+            with patch("backend.app.services.browser_diagnostics.verify_browser_runtime", return_value={"available": True}):
+                with patch("linkedin_hunter.auth.session.has_valid_session", return_value=True):
+                    with patch("linkedin_hunter.auth.session.load_cookies", return_value=[{"name": "li_at", "value": "mock-cookie"}]):
+                        with patch("linkedin_hunter.auth.session.check_session_health", new_callable=AsyncMock) as mock_health:
+                            mock_health.return_value = {"authenticated": True, "details": "Verified"}
+                            with patch("linkedin_hunter.browser.engine.BrowserEngine.launch", new_callable=AsyncMock) as mock_launch:
+                                mock_launch.return_value = AsyncMock()
+                                with patch("linkedin_hunter.browser.engine.BrowserEngine.load_cookies", new_callable=AsyncMock):
+                                    with patch("linkedin_hunter.browser.engine.BrowserEngine.close", new_callable=AsyncMock) as mock_close:
+                                        with patch("linkedin_hunter.jobs.apply.execute_single_job_playwright_apply", new_callable=AsyncMock) as mock_apply:
+                                            mock_apply.return_value = ambiguous_return
+                                            with patch("backend.app.services.application_service.ApplicationService.record_application") as mock_record_app:
+                                                mock_app_rec = MagicMock()
+                                                mock_app_rec.id = uuid.uuid4()
+                                                mock_app_rec.attempt_count = 0
+                                                mock_record_app.return_value = mock_app_rec
 
-                                        await execute_automation_run(
-                                            mock_run.id,
-                                            mock_run.user_id,
-                                            dry_run=False,
-                                            max_jobs=1,
-                                            allow_live_submission=True,
-                                            live_submission_confirmation="CONFIRM_REAL_SUBMISSION",
-                                        )
+                                                await execute_automation_run(
+                                                    mock_run.id,
+                                                    mock_run.user_id,
+                                                    dry_run=False,
+                                                    max_jobs=1,
+                                                    allow_live_submission=True,
+                                                    live_submission_confirmation="CONFIRM_REAL_SUBMISSION",
+                                                )
 
-                                        # applications_submitted must remain strictly 0
-                                        assert mock_run.applications_submitted == 0
-                                        assert mock_run.applications_failed == 1
-                                        assert mock_record_app.call_args[1]["status"] == "submission_failed"
-                                        mock_close.assert_called_once()
+                                                # applications_submitted must remain strictly 0
+                                                assert mock_run.applications_submitted == 0
+                                                assert mock_run.applications_failed == 1
+                                                assert mock_record_app.call_args[1]["status"] == "needs_verification"
+                                                mock_close.assert_called_once()
 
 
 

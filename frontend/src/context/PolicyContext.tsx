@@ -23,24 +23,35 @@ export const PolicyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isCheckingPolicy, setIsCheckingPolicy] = useState<boolean>(false);
   const [hasDeclined, setHasDeclined] = useState<boolean>(false);
 
-  const checkPolicyStatus = useCallback(async () => {
+  const hasAcceptedRef = React.useRef<boolean | null>(null);
+  const prevTokenRef = React.useRef<string | null>(null);
+
+  const checkPolicyStatus = useCallback(async (silent = false) => {
     // Only check if user is authenticated and email is verified
     if (!isAuthenticated || !token || (user && !user.email_confirmed_at)) {
       setHasAcceptedPolicy(null);
+      hasAcceptedRef.current = null;
       setPolicyStatus(null);
       setIsCheckingPolicy(false);
       return;
     }
 
-    setIsCheckingPolicy(true);
+    // Only set blocking loading indicator if status is not known yet and not silent
+    if (!silent && hasAcceptedRef.current === null) {
+      setIsCheckingPolicy(true);
+    }
     try {
       const status = await policyService.getStatus();
       setPolicyStatus(status);
       setHasAcceptedPolicy(status.has_accepted);
+      hasAcceptedRef.current = status.has_accepted;
     } catch (err) {
       console.warn('Failed to retrieve policy acceptance status:', err);
-      // If error (e.g. network/server), default to unaccepted to protect features
-      setHasAcceptedPolicy(false);
+      // If error (e.g. network/server), default to unaccepted only if not previously resolved
+      if (hasAcceptedRef.current === null) {
+        setHasAcceptedPolicy(false);
+        hasAcceptedRef.current = false;
+      }
     } finally {
       setIsCheckingPolicy(false);
     }
@@ -48,14 +59,18 @@ export const PolicyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     if (isAuthenticated) {
-      checkPolicyStatus();
+      const isTokenRefresh = prevTokenRef.current !== null && prevTokenRef.current !== token;
+      prevTokenRef.current = token;
+      checkPolicyStatus(isTokenRefresh);
     } else {
+      prevTokenRef.current = null;
+      hasAcceptedRef.current = null;
       setHasAcceptedPolicy(null);
       setPolicyStatus(null);
       setHasDeclined(false);
       setIsCheckingPolicy(false);
     }
-  }, [isAuthenticated, checkPolicyStatus]);
+  }, [isAuthenticated, token, checkPolicyStatus]);
 
   useEffect(() => {
     const handleAuthCleanup = () => {

@@ -119,8 +119,30 @@ async def check_session_health(
         current_url = page.url or ""
         # If page has not navigated yet, go to feed
         if not current_url or current_url.startswith("about:") or current_url.startswith("data:"):
-            await page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=15000)
-            current_url = page.url
+            try:
+                await page.goto("https://www.linkedin.com/feed/", wait_until="commit", timeout=20000)
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=8000)
+                except Exception:
+                    pass
+            except Exception as goto_err:
+                err_text = str(goto_err)
+                if "ERR_TOO_MANY_REDIRECTS" in err_text:
+                    log.warning("LinkedIn redirected too many times on /feed/ (session expired): %s", goto_err)
+                    return {
+                        "authenticated": False,
+                        "session_available": True,
+                        "login_redirect": True,
+                        "checkpoint_detected": False,
+                        "is_chrome_error": True,
+                        "details": "Redirect loop on authentication (expired session).",
+                    }
+                raise goto_err
+            current_url = page.url or ""
+
+        is_chrome_error = any(
+            x in (current_url or "").lower() for x in ["chrome-error://", "chromewebdata"]
+        )
 
         is_login_redirect = any(
             x in current_url for x in ["/login", "/authwall", "/uas/login", "/signup"]
@@ -129,13 +151,19 @@ async def check_session_health(
             x in current_url for x in ["/checkpoint", "/challenge", "/security-check"]
         )
 
-        # Check URL, title, and DOM indicators
-        is_feed = any(x in current_url for x in ["/feed", "/mynetwork", "/jobs", "/in/"])
         raw_title = page.title() if callable(getattr(page, "title", None)) else getattr(page, "title", "")
         if hasattr(raw_title, "__await__"):
             raw_title = await raw_title
         title = str(raw_title or "")
         is_not_login_title = not any(x in title.lower() for x in ["sign in", "log in", "authwall", "join linkedin"])
+
+        try:
+            await page.wait_for_selector(
+                "nav, header, nav.global-nav, div.global-nav__me, #global-nav, div.scaffold-layout, input#username, div#captcha-internal",
+                timeout=8000,
+            )
+        except Exception:
+            pass
 
         nav = await page.query_selector("nav, header, nav.global-nav, div.global-nav__me, #global-nav, div.scaffold-layout")
         profile_menu = await page.query_selector("button.global-nav__primary-link-me-menu-trigger, button[aria-label*='Me'], button[aria-label*='profile' i]")
@@ -144,8 +172,23 @@ async def check_session_health(
         if checkpoint_dom:
             is_checkpoint = True
 
+        # STRICT MULTI-SIGNAL AUTHENTICATION INVARIANT:
+        # A session is ONLY authenticated if real authenticated DOM indicators are present,
+        # AND it is not on a Chrome error page, login redirect, or security checkpoint.
+        is_feed = "linkedin.com/feed" in current_url and "feed" in title.lower()
+        has_auth_dom = bool(nav or profile_menu or is_feed)
+        log.info(
+            "check_session_health: url=%s title=%s nav=%s profile_menu=%s is_feed=%s login_redirect=%s",
+            current_url,
+            title,
+            bool(nav),
+            bool(profile_menu),
+            is_feed,
+            is_login_redirect,
+        )
         authenticated = bool(
-            (nav or profile_menu or (is_feed and is_not_login_title))
+            has_auth_dom
+            and not is_chrome_error
             and not is_login_redirect
             and not is_checkpoint
         )
@@ -155,21 +198,27 @@ async def check_session_health(
             "session_available": True,
             "login_redirect": is_login_redirect,
             "checkpoint_detected": is_checkpoint,
+            "is_chrome_error": is_chrome_error,
             "details": "Authenticated session verified." if authenticated else (
                 "Checkpoint / Challenge detected." if is_checkpoint else (
-                    "Redirected to login page." if is_login_redirect else "Authentication indicators not detected."
+                    "Redirected to login page." if is_login_redirect else (
+                        "Chrome error page reached (navigation failed)." if is_chrome_error else "Authentication indicators not detected."
+                    )
                 )
             ),
         }
 
     except Exception as e:
         log.warning("Error during session health check: %s", e)
+        err_str = str(e)
+        is_redirect_loop = "ERR_TOO_MANY_REDIRECTS" in err_str
         return {
             "authenticated": False,
             "session_available": True,
-            "login_redirect": False,
+            "login_redirect": is_redirect_loop,
             "checkpoint_detected": False,
-            "details": f"Session verification error: {str(e)}",
+            "is_chrome_error": "chrome-error" in (getattr(page, "url", "") or "") or "chromewebdata" in (getattr(page, "url", "") or ""),
+            "details": "Redirect loop detected (expired session)." if is_redirect_loop else f"Session verification error: {err_str}",
         }
 
 

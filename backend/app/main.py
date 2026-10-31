@@ -1,8 +1,18 @@
 """Main FastAPI application entrypoint."""
 
 import logging
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict
+
+# Ensure repository root and 'src/' directory are on sys.path
+_repo_root = Path(__file__).resolve().parent.parent.parent
+_src_dir = _repo_root / "src"
+for _path in (str(_repo_root), str(_src_dir)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -58,6 +68,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Policy-Required"],
 )
 
 # Global Exception Handlers

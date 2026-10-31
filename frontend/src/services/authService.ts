@@ -17,12 +17,85 @@ import { mapPasswordUpdateError } from './passwordRecoveryFlow';
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || 'https://jgswscubkoevjmyorrha.supabase.co').trim();
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impnc3dzY3Via29ldmpteW9ycmhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MjIyMjYsImV4cCI6MjEwNjA5ODIyNn0.r7DNagli-Nfd5bgvSTqbKGM1QVSeYvELNpcd0DToJKE').trim();
 
+export const REMEMBER_ME_STORAGE_KEY = 'rolepilot_remember_me';
+
+export function getRememberMePreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    if (window.sessionStorage?.getItem(REMEMBER_ME_STORAGE_KEY) === 'false') return false;
+    if (window.localStorage?.getItem(REMEMBER_ME_STORAGE_KEY) === 'false') return false;
+  } catch {
+    // Safe fallback
+  }
+  return true;
+}
+
+export function setRememberMePreference(rememberMe: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (rememberMe) {
+      window.localStorage?.setItem(REMEMBER_ME_STORAGE_KEY, 'true');
+      window.sessionStorage?.removeItem(REMEMBER_ME_STORAGE_KEY);
+    } else {
+      window.sessionStorage?.setItem(REMEMBER_ME_STORAGE_KEY, 'false');
+      window.localStorage?.setItem(REMEMBER_ME_STORAGE_KEY, 'false');
+    }
+  } catch {
+    // Safe fallback
+  }
+}
+
+/**
+ * Dynamic storage adapter for Supabase client.
+ * Respects Remember Me preference:
+ * - Persistent (localStorage) when rememberMe is true (survives browser restarts).
+ * - Session-only (sessionStorage) when rememberMe is false (cleared on browser/tab close).
+ * - Falls back seamlessly between the two on page reloads so refreshing doesn't log the candidate out.
+ */
+export const dynamicAuthStorage = {
+  getItem: (key: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const sessionVal = window.sessionStorage?.getItem(key);
+      if (sessionVal !== null) return sessionVal;
+      return window.localStorage?.getItem(key) ?? null;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      const remember = getRememberMePreference();
+      if (remember) {
+        window.localStorage?.setItem(key, value);
+        window.sessionStorage?.removeItem(key);
+      } else {
+        window.sessionStorage?.setItem(key, value);
+        window.localStorage?.removeItem(key);
+      }
+    } catch {
+      // Safe fallback
+    }
+  },
+  removeItem: (key: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage?.removeItem(key);
+      window.sessionStorage?.removeItem(key);
+    } catch {
+      // Safe fallback
+    }
+  },
+};
+
 export let supabase: SupabaseClient | null = null;
 
 if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   try {
     supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
+        storage: dynamicAuthStorage,
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
@@ -40,6 +113,7 @@ export interface AuthResult {
   user?: User | null;
   session?: Session | null;
   requiresEmailVerification?: boolean;
+  isDeletedAccount?: boolean;
   message?: string;
   error?: string;
 }
@@ -53,8 +127,41 @@ export const authService = {
     return supabase;
   },
 
+  getRememberMe(): boolean {
+    return getRememberMePreference();
+  },
+
+  setRememberMe(rememberMe: boolean): void {
+    setRememberMePreference(rememberMe);
+  },
+
+  /**
+   * Validate whether an email is available and not reserved by a previously deleted account.
+   */
+  async checkRegistrationEmail(email: string): Promise<{ allowed: boolean; isDeletedAccount?: boolean; error?: string }> {
+    try {
+      await apiClient.post<{ allowed: boolean; message: string }>('/api/v1/auth/check-registration', {
+        email: email.trim(),
+      });
+      return { allowed: true };
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || err?.message || '';
+      if (status === 409 || typeof detail === 'string' && detail.toLowerCase().includes('previously deleted')) {
+        return {
+          allowed: false,
+          isDeletedAccount: true,
+          error:
+            'An account associated with this email address was previously deleted, and a new account cannot be created with it. If you believe this is a mistake or need assistance, please contact RolePilot Support.',
+        };
+      }
+      return { allowed: true };
+    }
+  },
+
   /**
    * Register a new user with email, password, and full name.
+   * Checks authoritative email reservations against deleted accounts before invoking Supabase Auth.
    * Supabase sends a one-time verification code (OTP) to the email.
    */
   async signUp(params: {
@@ -70,6 +177,16 @@ export const authService = {
     }
 
     try {
+      // 1. Authoritative check against deleted account email reservation
+      const emailCheck = await this.checkRegistrationEmail(params.email);
+      if (!emailCheck.allowed) {
+        return {
+          success: false,
+          isDeletedAccount: true,
+          error: emailCheck.error || 'Registration is unavailable for this email address.',
+        };
+      }
+
       const nameParts = params.fullName.trim().split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
@@ -101,6 +218,7 @@ export const authService = {
           error: 'An account with this email address already exists. Please log in with your password, or use Forgot Password to reset it.',
         };
       }
+
 
       // If email confirmation is enabled (link-based confirmation flow)
       const isConfirmed = !!data.user?.email_confirmed_at;
@@ -298,12 +416,17 @@ export const authService = {
   async signIn(params: {
     email: string;
     password: string;
+    rememberMe?: boolean;
   }): Promise<AuthResult> {
     if (!supabase) {
       return {
         success: false,
         error: 'Supabase Auth is not configured.',
       };
+    }
+
+    if (params.rememberMe !== undefined) {
+      this.setRememberMe(params.rememberMe);
     }
 
     try {
@@ -498,6 +621,7 @@ export const authService = {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem('supabase_access_token');
+        window.localStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
 
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.localStorage.length; i++) {
@@ -521,6 +645,9 @@ export const authService = {
       }
 
       if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.removeItem('supabase_access_token');
+        window.sessionStorage.removeItem(REMEMBER_ME_STORAGE_KEY);
+
         const sessionKeysToRemove: string[] = [];
         for (let i = 0; i < window.sessionStorage.length; i++) {
           const key = window.sessionStorage.key(i);

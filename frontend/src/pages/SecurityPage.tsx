@@ -15,6 +15,7 @@ import {
 import { RolePilotLogo } from '../components/common/RolePilotLogo';
 import { PublicFooter } from '../components/common/PublicFooter';
 import type { ContactPageProps } from './ContactPage';
+import { useNavigate } from '../context/NavigationContext';
 import '../components/auth/auth.css';
 
 export const SecurityPage: React.FC<ContactPageProps> = ({
@@ -34,7 +35,10 @@ export const SecurityPage: React.FC<ContactPageProps> = ({
   onNavigateSecurity,
   onNavigateIntegrations,
   onNavigateContact,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
+  const navigate = useNavigate();
   useEffect(() => {
     document.title = 'Security & Trust Center — RolePilot';
   }, []);
@@ -45,14 +49,18 @@ export const SecurityPage: React.FC<ContactPageProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateHome}
+            onClick={isAuthenticated && onNavigateDashboard ? onNavigateDashboard : onNavigateHome}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateHome();
+                if (isAuthenticated && onNavigateDashboard) {
+                  onNavigateDashboard();
+                } else {
+                  onNavigateHome();
+                }
               }
             }}
             aria-label="RolePilot Home"
@@ -70,22 +78,36 @@ export const SecurityPage: React.FC<ContactPageProps> = ({
               <ArrowLeft size={16} />
               <span>Back to home</span>
             </button>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -192,10 +214,7 @@ export const SecurityPage: React.FC<ContactPageProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  if (onNavigateContact) onNavigateContact();
-                  else window.location.href = '/contact?topic=Technical%20Support';
-                }}
+                onClick={() => navigate('/contact?topic=Technical%20Support')}
                 className="landing-btn-hero-primary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
               >
@@ -247,6 +266,8 @@ export const SecurityPage: React.FC<ContactPageProps> = ({
         onNavigateContact={onNavigateContact}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

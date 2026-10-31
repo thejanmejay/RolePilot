@@ -18,6 +18,8 @@ export interface PublicFooterProps {
   onNavigateContact?: () => void;
   onNavigateLogin?: () => void;
   onNavigateSignup?: () => void;
+  isAuthenticated?: boolean;
+  onNavigateDashboard?: () => void;
 }
 
 export const PublicFooter: React.FC<PublicFooterProps> = ({
@@ -37,6 +39,8 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({
   onNavigateContact,
   onNavigateLogin,
   onNavigateSignup,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
   const handleLink = (e: React.MouseEvent<HTMLAnchorElement>, handler?: () => void) => {
     if (handler && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
@@ -79,25 +83,38 @@ export const PublicFooter: React.FC<PublicFooterProps> = ({
               Structured, transparent job search workflows with objective qualification readiness scoring and human review.
             </p>
             <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-              {onNavigateLogin && (
+              {isAuthenticated && onNavigateDashboard ? (
                 <button
                   type="button"
-                  onClick={onNavigateLogin}
-                  className="auth-btn-secondary"
-                  style={{ fontSize: '0.8rem', height: '32px', padding: '0 12px' }}
-                >
-                  Log in
-                </button>
-              )}
-              {onNavigateSignup && (
-                <button
-                  type="button"
-                  onClick={onNavigateSignup}
+                  onClick={onNavigateDashboard}
                   className="landing-btn-hero-primary"
                   style={{ fontSize: '0.8rem', height: '32px', padding: '0 12px' }}
                 >
-                  Get started
+                  Dashboard &rarr;
                 </button>
+              ) : (
+                <>
+                  {onNavigateLogin && (
+                    <button
+                      type="button"
+                      onClick={onNavigateLogin}
+                      className="auth-btn-secondary"
+                      style={{ fontSize: '0.8rem', height: '32px', padding: '0 12px' }}
+                    >
+                      Log in
+                    </button>
+                  )}
+                  {onNavigateSignup && (
+                    <button
+                      type="button"
+                      onClick={onNavigateSignup}
+                      className="landing-btn-hero-primary"
+                      style={{ fontSize: '0.8rem', height: '32px', padding: '0 12px' }}
+                    >
+                      Get started
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

@@ -155,6 +155,7 @@ def test_stale_lease_recovery_flags_live_submission_as_needs_reconciliation(test
 
     db.refresh(run)
     assert run.status == "needs_reconciliation"
+    assert run.error_message is not None
     assert "needs_reconciliation to prevent duplicate submissions" in run.error_message
 
 
@@ -181,6 +182,7 @@ def test_stale_lease_exceeded_attempts_marks_failed(test_db):
 
     db.refresh(run)
     assert run.status == "failed"
+    assert run.error_message is not None
     assert "Exceeded maximum execution attempts" in run.error_message
 
 
@@ -233,7 +235,7 @@ def test_cooperative_cancellation_invalidates_heartbeat(test_db):
 def test_triple_key_submission_guard_boundary_matrix():
     """Verify all 8 negative and positive permutations of Triple-Key Safety Guard fail closed."""
     def is_authorized(dry_run: bool, allow_live: bool, confirmation: str | None) -> bool:
-        return bool(
+        return (
             (dry_run is False)
             and (allow_live is True)
             and (confirmation == "CONFIRM_REAL_SUBMISSION")

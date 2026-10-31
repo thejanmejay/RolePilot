@@ -17,6 +17,9 @@ export interface InfoPageNavigationProps {
   onNavigateGuidelines?: () => void;
   onNavigateSupport?: () => void;
   onNavigateBlog?: () => void;
+  onNavigateContact?: () => void;
+  isAuthenticated?: boolean;
+  onNavigateDashboard?: () => void;
 }
 
 export const AboutPage: React.FC<InfoPageNavigationProps> = ({
@@ -29,6 +32,8 @@ export const AboutPage: React.FC<InfoPageNavigationProps> = ({
   onNavigateGuidelines,
   onNavigateSupport,
   onNavigateBlog,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
   useEffect(() => {
     document.title = 'About — RolePilot';
@@ -39,14 +44,18 @@ export const AboutPage: React.FC<InfoPageNavigationProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateHome}
+            onClick={isAuthenticated && onNavigateDashboard ? onNavigateDashboard : onNavigateHome}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateHome();
+                if (isAuthenticated && onNavigateDashboard) {
+                  onNavigateDashboard();
+                } else {
+                  onNavigateHome();
+                }
               }
             }}
             aria-label="RolePilot Home"
@@ -64,22 +73,36 @@ export const AboutPage: React.FC<InfoPageNavigationProps> = ({
               <ArrowLeft size={16} />
               <span>Back to home</span>
             </button>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -181,6 +204,8 @@ export const AboutPage: React.FC<InfoPageNavigationProps> = ({
         onNavigateBlog={onNavigateBlog}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

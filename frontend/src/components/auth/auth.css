@@ -4,32 +4,32 @@
    ========================================================================== */
 
 :root {
-  --rolepilot-navy: #101A3A;
-  --rolepilot-blue: #1769E8;
-  --rolepilot-blue-hover: #0E56C5;
-  --rolepilot-blue-light: #EFF6FF;
+  --rolepilot-navy: #111827;
+  --rolepilot-blue: #1769C2;
+  --rolepilot-blue-hover: #1257A5;
+  --rolepilot-blue-light: #DBEAFE;
   --rolepilot-blue-border: #BFDBFE;
-  --rolepilot-blue-focus: rgba(23, 105, 232, 0.25);
+  --rolepilot-blue-focus: rgba(23, 105, 194, 0.25);
   --rolepilot-cyan: #12B9F4;
   --rolepilot-gold: #FFAD18;
   --rolepilot-gold-light: #FEF3C7;
 
-  --auth-blue: var(--rolepilot-blue);
-  --auth-blue-hover: var(--rolepilot-blue-hover);
-  --auth-blue-light: var(--rolepilot-blue-light);
-  --auth-blue-border: var(--rolepilot-blue-border);
-  --auth-blue-focus: var(--rolepilot-blue-focus);
+  --auth-blue: var(--primary, #1769C2);
+  --auth-blue-hover: var(--primary-hover, #1257A5);
+  --auth-blue-light: var(--primary-light, #DBEAFE);
+  --auth-blue-border: var(--primary-border, #BFDBFE);
+  --auth-blue-focus: var(--focus-ring, rgba(23, 105, 194, 0.25));
 
-  --auth-bg: #F8FAFC;
-  --auth-card-bg: #FFFFFF;
-  --auth-border: #E2E8F0;
+  --auth-bg: var(--bg-main, #F3F6FA);
+  --auth-card-bg: var(--bg-card, #FFFFFF);
+  --auth-border: var(--border-light, #E5E7EB);
   --auth-border-hover: #CBD5E1;
-  --auth-text-main: #101A3A;
-  --auth-text-muted: #64748B;
-  --auth-text-subtle: #94A3B8;
+  --auth-text-main: var(--text-main, #172554);
+  --auth-text-muted: var(--text-muted, #64748B);
+  --auth-text-subtle: var(--text-subtle, #94A3B8);
 
-  --auth-shadow-card: 0 4px 24px -2px rgba(16, 26, 58, 0.08), 0 2px 6px -1px rgba(16, 26, 58, 0.04);
-  --auth-shadow-elevated: 0 20px 30px -10px rgba(16, 26, 58, 0.12), 0 8px 12px -4px rgba(16, 26, 58, 0.06);
+  --auth-shadow-card: 0 4px 24px -2px rgba(17, 24, 39, 0.08), 0 2px 6px -1px rgba(17, 24, 39, 0.04);
+  --auth-shadow-elevated: 0 20px 30px -10px rgba(17, 24, 39, 0.12), 0 8px 12px -4px rgba(17, 24, 39, 0.06);
 }
 
 /* --------------------------------------------------------------------------
@@ -1309,6 +1309,146 @@ html {
   line-height: 1.5;
   color: var(--auth-text-muted);
   margin: 0;
+}
+
+.landing-resume-checker-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: center;
+  gap: 28px;
+}
+
+.landing-resume-checker-content {
+  min-width: 0;
+}
+
+.landing-resume-checker-eyebrow {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--auth-blue-light);
+  color: var(--auth-blue);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.landing-resume-checker-title {
+  margin: 12px 0 8px;
+  color: var(--auth-text-main);
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.landing-resume-checker-description {
+  max-width: 620px;
+  margin: 0 0 16px;
+  color: var(--auth-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.landing-resume-checker-benefits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin: 0 0 20px;
+  padding: 0;
+  color: var(--auth-text-muted);
+  font-size: 0.85rem;
+  list-style: none;
+}
+
+.landing-resume-checker-benefits li {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.45;
+}
+
+.landing-resume-checker-benefits svg {
+  flex: 0 0 auto;
+  color: var(--success, #16A34A);
+}
+
+.landing-resume-checker-cta {
+  justify-content: center;
+  gap: 8px;
+}
+
+.landing-resume-checker-preview {
+  width: 100%;
+  max-width: 280px;
+  justify-self: end;
+  box-sizing: border-box;
+  padding: 24px;
+  border: 1px solid var(--auth-border);
+  border-radius: 12px;
+  background: #F8FAFC;
+  text-align: center;
+}
+
+.landing-resume-checker-score {
+  display: flex;
+  width: 70px;
+  height: 70px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  border: 5px solid #16A34A;
+  border-radius: 50%;
+  background: #FFFFFF;
+  color: #16A34A;
+}
+
+.landing-resume-checker-score span {
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+.landing-resume-checker-grade {
+  margin-bottom: 4px;
+  color: var(--auth-text-main);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.landing-resume-checker-preview-note {
+  margin: 0;
+  color: var(--auth-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .landing-resume-checker-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+  }
+
+  .landing-resume-checker-title {
+    font-size: 1.55rem;
+  }
+
+  .landing-resume-checker-benefits {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .landing-resume-checker-preview {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-resume-checker-cta {
+    width: 100%;
+    padding-inline: 16px;
+    font-size: 0.95rem;
+  }
 }
 
 /* --------------------------------------------------------------------------

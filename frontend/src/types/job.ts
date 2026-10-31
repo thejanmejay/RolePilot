@@ -59,6 +59,26 @@ export interface SearchConfigCreate {
   is_active?: boolean;
 }
 
+export interface SyncedJob {
+  id: string;
+  job_id?: string | null;
+  linkedin_job_id: string;
+  listing_url: string;
+  title?: string | null;
+  company?: string | null;
+  location?: string | null;
+  description?: string | null;
+  workplace_type?: string | null;
+  employment_type?: string | null;
+  experience_level?: string | null;
+  is_easy_apply?: boolean | null;
+  source_platform: string;
+  source_page_url: string;
+  observation_count: number;
+  first_extracted_at: string;
+  last_extracted_at: string;
+}
+
 export interface MatchAnalysis {
   matchScore: number;
   matchedSkills: string[];

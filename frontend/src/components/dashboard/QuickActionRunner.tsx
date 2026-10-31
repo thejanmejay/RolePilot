@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Play, ShieldCheck, Sliders, ArrowRight, Loader2, Sparkles, MapPin } from 'lucide-react';
 import { automationApi } from '../../api/automation';
 import { useToast } from '../../context/ToastContext';
-import { formatErrorMessage } from '../../api/client';
+import { formatErrorMessage, getStructuredApiError } from '../../api/client';
 import { linkedinApi } from '../../api/linkedin';
 import type { SearchConfig } from '../../types/job';
 
@@ -47,7 +47,18 @@ export const QuickActionRunner: React.FC<QuickActionRunnerProps> = ({
       onRunTriggered();
       onNavigateTab('automation');
     } catch (err) {
-      showError(formatErrorMessage(err));
+      const struct = getStructuredApiError(err);
+      const isExpired =
+        struct?.errorCode === 'LINKEDIN_SESSION_EXPIRED' ||
+        struct?.errorCode === 'LINKEDIN_SESSION_INVALID' ||
+        struct?.errorCode === 'LINKEDIN_SESSION_MISSING' ||
+        formatErrorMessage(err).toLowerCase().includes('session');
+      if (isExpired && onRequireLinkedInConsent) {
+        showError(struct?.message || 'LinkedIn session expired. Please reconnect your LinkedIn account to continue.');
+        onRequireLinkedInConsent();
+      } else {
+        showError(struct?.message || formatErrorMessage(err));
+      }
     } finally {
       setIsSubmitting(false);
     }

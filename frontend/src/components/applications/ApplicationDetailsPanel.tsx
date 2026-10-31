@@ -117,12 +117,10 @@ export const ApplicationDetailsPanel: React.FC<ApplicationDetailsPanelProps> = (
 
   return (
     <div
-      className="card"
+      className="card detail-pane-scroll"
       style={{
         padding: '20px',
         position: 'relative',
-        maxHeight: 'calc(100vh - 100px)',
-        overflowY: 'auto',
         border: '1px solid var(--border-color)',
         borderRadius: 'var(--radius-lg)',
         boxShadow: 'var(--shadow-md)',

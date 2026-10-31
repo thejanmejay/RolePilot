@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +41,12 @@ class AutomationRun(Base):
     allow_live_submission: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     live_submission_confirmation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_jobs: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    search_overrides: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    selected_synced_job_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    resume_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resumes.id", ondelete="SET NULL"), nullable=True
+    )
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
     # Durable Queue and Lease Management
     worker_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

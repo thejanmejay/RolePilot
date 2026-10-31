@@ -22,6 +22,7 @@ import { AuthModal } from '../components/AuthModal';
 
 interface ProfilePageProps {
   onNavigateTab?: (tab: 'dashboard' | 'profile' | 'jobs' | 'applications' | 'automation') => void;
+  isActive?: boolean;
 }
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigateTab }) => {

@@ -14,13 +14,16 @@ const backendWorkerPath = path.resolve('backend/app/workers/linkedin_worker.py')
 test('LinkedInConsentModal renders exact header, purpose points, and safeguard copy', () => {
   const code = fs.readFileSync(modalPath, 'utf8');
 
-  // Title and subtitle matching design mock
-  assert.ok(code.includes('Connect LinkedIn to RolePilot'), 'Modal must have exact title');
-  assert.ok(code.includes('Review how your account will be used'), 'Modal must have exact subtitle');
+  // Title and subtitle matching redesigned spec
+  assert.ok(code.includes('Connect LinkedIn'), 'Modal must have Connect LinkedIn title');
+  assert.ok(
+    code.includes('Connect your LinkedIn session to let RolePilot find relevant jobs and assist with application preparation.'),
+    'Modal must have concise description'
+  );
 
   // Purpose of access bullet points
   assert.ok(code.includes('Find and evaluate jobs against your preferences.'), 'Must list job discovery purpose');
-  assert.ok(code.includes('Help populate application details using your saved profile and resume.'), 'Must list profile populating purpose');
+  assert.ok(code.includes('Help prepare application details using your profile and resume.'), 'Must list profile populating purpose');
   assert.ok(code.includes('Track automation progress and application outcomes.'), 'Must list telemetry outcome purpose');
 
   // Submission safeguard copy
@@ -30,9 +33,9 @@ test('LinkedInConsentModal renders exact header, purpose points, and safeguard c
     'Must explicitly state that access does not bypass submission safeguards'
   );
 
-  // Buttons matching design mock
-  assert.ok(code.includes('Continue'), 'Must have Continue primary button');
-  assert.ok(code.includes('Cancel and return to dashboard'), 'Must have Cancel secondary button');
+  // Buttons matching redesigned spec
+  assert.ok(code.includes('Connect LinkedIn'), 'Must have Connect LinkedIn primary button');
+  assert.ok(code.includes('Cancel'), 'Must have Cancel secondary button');
 });
 
 test('LinkedInConsentModal enforces unchecked-by-default checkbox and prevents duplicate clicks', () => {

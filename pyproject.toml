@@ -22,3 +22,10 @@ linkedin-hunter = "linkedin_hunter.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pyright]
+include = ["src", "backend", "tests"]
+extraPaths = [".", "src"]
+pythonVersion = "3.11"
+venvPath = "linkedin-hunter"
+venv = ".venv"

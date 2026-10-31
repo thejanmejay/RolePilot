@@ -12,7 +12,7 @@ Follows the exact test order specified:
 import io
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 import pytest
@@ -333,12 +333,19 @@ def test_08_end_to_end_dry_run_workflow(auth_headers):
     assert len(res_jobs.json()) >= 1
 
     # 3. Launch Dry Run Automation
+    client.post("/api/v1/linkedin/consent", json={"accepted": True}, headers=auth_headers)
     dry_run_payload = {
         "dry_run": True,
         "max_jobs": 10,
     }
-    with patch("backend.app.workers.queue_worker.QueueWorker.process_run_by_id") as mock_worker, \
+    from backend.app.services.linkedin_session_validator import PreflightValidationResult
+    with patch("backend.app.services.linkedin_session_validator.LinkedInSessionValidator.validate_session", new_callable=AsyncMock) as mock_validation, \
+         patch("backend.app.workers.queue_worker.QueueWorker.process_run_by_id") as mock_worker, \
          patch("backend.app.api.automation.run_linkedin_automation_task", mock_worker):
+        mock_validation.return_value = PreflightValidationResult(
+            is_valid=True,
+            cookies=[{"name": "li_at", "value": "test-cookie"}],
+        )
         res_run = client.post(
             "/api/v1/automation/runs", json=dry_run_payload, headers=auth_headers
         )

@@ -12,6 +12,7 @@ from backend.app.db.models.application_answer import ApplicationAnswer
 from backend.app.db.models.automation_log import AutomationLog
 from backend.app.db.models.automation_run import AutomationRun
 from backend.app.db.models.education import Education
+from backend.app.db.models.email_reservation import EmailReservation
 from backend.app.db.models.experience import Experience
 from backend.app.db.models.job import Job
 from backend.app.db.models.linkedin_account import LinkedInAccount
@@ -21,6 +22,7 @@ from backend.app.db.models.resume import Resume
 from backend.app.db.models.search_config import SearchConfig
 from backend.app.db.models.skill import Skill
 from tests.conftest import TEST_SECRET, TestingSessionLocal, client, create_test_token, test_engine
+
 
 
 class FakeStorageBucket:
@@ -315,40 +317,268 @@ def test_repeated_delete_treats_already_missing_auth_user_as_success(monkeypatch
     assert admin.auth_calls == [str(user_id), str(user_id)]
 
 
-def test_same_email_can_start_fresh_policy_and_onboarding_flow_after_deletion(monkeypatch):
+def test_deleted_email_is_reserved_and_rejects_new_registration(monkeypatch):
     old_user_id = uuid.uuid4()
-    _seed_account(old_user_id, email="reusable@example.com")
+    test_email = "reserved-candidate@example.com"
+    _seed_account(old_user_id, email=test_email)
     admin = FakeAdmin()
     monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
 
-    assert client.delete("/api/v1/account", headers=_headers(old_user_id)).status_code == 204
+    # Execute deletion
+    del_res = client.delete("/api/v1/account", headers=_headers(old_user_id))
+    assert del_res.status_code == 204
 
-    # Supabase Auth assigns a new subject after a successful delete and signup.
-    new_user_id = uuid.uuid4()
-    headers = _headers(new_user_id, email="reusable@example.com")
-    accepted = client.post("/api/v1/policy/accept", headers=headers, json={})
-    assert accepted.status_code == 200
-    status_response = client.get("/api/v1/policy/acceptance-status", headers=headers)
-    assert status_response.status_code == 200
-    assert status_response.json()["has_accepted"] is True
+    # 1. Authoritative EmailReservation row exists in database
+    db = TestingSessionLocal()
+    reservation = db.query(EmailReservation).filter(
+        EmailReservation.normalized_email == test_email.strip().lower()
+    ).first()
+    assert reservation is not None
+    assert reservation.reason == "account_deleted"
+    assert reservation.user_id == old_user_id
+    db.close()
 
-    onboarding = client.post(
-        "/api/v1/profile/onboarding",
-        headers=headers,
-        json={
-            "full_name": "Fresh Candidate",
-            "headline": "Software Engineer",
-            "target_role": "Backend Engineer",
-            "experience_years": 3,
-            "city": "Bengaluru",
-            "country": "India",
-            "phone": "+91 98765 43210",
-        },
+    # 2. Check registration endpoint rejects exact email with HTTP 409
+    expected_message = (
+        "An account associated with this email address was previously deleted, "
+        "and a new account cannot be created with it. If you believe this is a "
+        "mistake or need assistance, please contact RolePilot Support."
     )
-    assert onboarding.status_code == 200
-    assert onboarding.json()["onboarding_completed"] is True
-    profile = client.get("/api/v1/profile", headers=headers)
-    assert profile.status_code == 200
-    assert profile.json()["id"] == str(new_user_id)
-    assert _count(Profile, old_user_id) == 0
-    assert admin.auth_calls == [str(old_user_id)]
+    res_exact = client.post("/api/v1/auth/check-registration", json={"email": test_email})
+    assert res_exact.status_code == 409
+    assert res_exact.json()["detail"] == expected_message
+
+    # 3. Case variations and whitespace are rejected identically
+    res_upper = client.post("/api/v1/auth/check-registration", json={"email": "  RESERVED-CANDIDATE@EXAMPLE.COM  "})
+    assert res_upper.status_code == 409
+    assert res_upper.json()["detail"] == expected_message
+
+    # 4. Check email alias endpoint works identically
+    res_alias = client.post("/api/v1/auth/check-email", json={"email": test_email})
+    assert res_alias.status_code == 409
+    assert res_alias.json()["detail"] == expected_message
+
+    # 5. Unrelated / new email passes registration check with HTTP 200
+    res_fresh = client.post("/api/v1/auth/check-registration", json={"email": "fresh-applicant@example.com"})
+    assert res_fresh.status_code == 200
+    assert res_fresh.json()["allowed"] is True
+
+    # 6. Auth deletion was recorded for old user
+    assert admin.auth.admin.delete_user if hasattr(admin.auth, 'admin') else admin.auth_calls == [str(old_user_id)]
+
+
+def test_deletion_revokes_protected_access_immediately(monkeypatch):
+    user_id = uuid.uuid4()
+    test_email = "revoked-user@example.com"
+    _seed_account(user_id, email=test_email)
+    admin = FakeAdmin()
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    # Verify protected access works before deletion
+    pre_res = client.get("/api/v1/policy/acceptance-status", headers=_headers(user_id, email=test_email))
+    assert pre_res.status_code == 200
+
+    # Delete account
+    del_res = client.delete("/api/v1/account", headers=_headers(user_id, email=test_email))
+    assert del_res.status_code == 204
+
+    # 1. Protected policy endpoints immediately return 401 Unauthorized
+    policy_status_res = client.get("/api/v1/policy/acceptance-status", headers=_headers(user_id, email=test_email))
+    assert policy_status_res.status_code == 401
+    assert "deleted" in policy_status_res.json()["detail"].lower()
+
+    policy_accept_res = client.post("/api/v1/policy/accept", json={"policy_type": "terms_and_privacy", "policy_version": "v1.0"}, headers=_headers(user_id, email=test_email))
+    assert policy_accept_res.status_code == 401
+    assert "deleted" in policy_accept_res.json()["detail"].lower()
+
+    # 2. Protected profile endpoints immediately return 401 Unauthorized and do not resurrect profile
+    profile_res = client.get("/api/v1/profile", headers=_headers(user_id, email=test_email))
+    assert profile_res.status_code == 401
+    assert "deleted" in profile_res.json()["detail"].lower()
+    assert _count(Profile, user_id) == 0
+
+
+def test_storage_generic_404_treated_as_success_on_retry(monkeypatch):
+    user_id = uuid.uuid4()
+    _, storage_path = _seed_account(user_id)
+
+    class GenericStorage404(Exception):
+        status_code = 404
+        message = "The resource was not found"
+
+    # Bucket raises generic 404 without the word "object"
+    class MissingBucket:
+        def __init__(self):
+            self.removed_paths = []
+
+        def remove(self, paths):
+            raise GenericStorage404("The resource was not found")
+
+    admin = FakeAdmin()
+    admin.bucket = MissingBucket()
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    # Deletion should succeed because missing storage objects are idempotent
+    res = client.delete("/api/v1/account", headers=_headers(user_id))
+    assert res.status_code == 204
+    assert _count(Profile, user_id) == 0
+
+
+def test_check_registration_does_not_enumerate_active_accounts():
+    active_user_id = uuid.uuid4()
+    active_email = "existing-active-user@example.com"
+    _seed_account(active_user_id, email=active_email)
+
+    # The registration-check endpoint must NOT reveal that an active account exists
+    res = client.post("/api/v1/auth/check-registration", json={"email": active_email})
+    assert res.status_code == 200
+    assert res.json()["allowed"] is True
+    assert "available" in res.json()["message"].lower() or "eligible" in res.json()["message"].lower()
+
+
+def test_email_normalization_variants_enforced(monkeypatch):
+    user_id = uuid.uuid4()
+    email_with_variants = "  Candidate.Test@Example.COM.  "
+    _seed_account(user_id, email=email_with_variants)
+    admin = FakeAdmin()
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    del_res = client.delete("/api/v1/account", headers=_headers(user_id, email=email_with_variants))
+    assert del_res.status_code == 204
+
+    # Test all variations are rejected
+    for variant in [
+        "candidate.test@example.com",
+        "CANDIDATE.TEST@EXAMPLE.COM",
+        "  candidate.test@example.com  ",
+        "candidate.test@example.com.",
+    ]:
+        res = client.post("/api/v1/auth/check-registration", json={"email": variant})
+        assert res.status_code == 409
+
+
+def test_concurrent_signup_reservation_unique_constraint():
+    """Verify that the database unique constraint strictly rejects duplicate normalized emails."""
+    db = TestingSessionLocal()
+    email = "concurrent-candidate@example.com"
+    res1 = EmailReservation(
+        id=uuid.uuid4(),
+        normalized_email=email,
+        user_id=uuid.uuid4(),
+        reason="account_deleted",
+    )
+    db.add(res1)
+    db.commit()
+
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    res2 = EmailReservation(
+        id=uuid.uuid4(),
+        normalized_email=email,
+        user_id=uuid.uuid4(),
+        reason="account_deleted",
+    )
+    db.add(res2)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+    db.close()
+
+
+def test_partially_failed_supabase_auth_cannot_reregister(monkeypatch):
+    """If Supabase Auth deletion fails, email reservation is preserved and blocks re-registration."""
+    user_id = uuid.uuid4()
+    test_email = "partial-auth-fail@example.com"
+    _seed_account(user_id, email=test_email)
+    admin = FakeAdmin(auth_failures=[RuntimeError("Supabase admin API unavailable")])
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    del_res = client.delete("/api/v1/account", headers=_headers(user_id, email=test_email))
+    assert del_res.status_code == 502
+    assert "Auth account could not be deleted" in del_res.json()["detail"]
+
+    # 1. Email is reserved immediately in database
+    db = TestingSessionLocal()
+    reservation = db.query(EmailReservation).filter(
+        EmailReservation.normalized_email == test_email
+    ).first()
+    assert reservation is not None
+    assert reservation.user_id == user_id
+    db.close()
+
+    # 2. Signup registration check rejects the email with 409 Conflict
+    reg_check = client.post("/api/v1/auth/check-registration", json={"email": test_email})
+    assert reg_check.status_code == 409
+    assert "previously deleted" in reg_check.json()["detail"]
+
+    # 3. Old JWT is rejected on protected endpoints
+    status_res = client.get("/api/v1/policy/acceptance-status", headers=_headers(user_id, email=test_email))
+    assert status_res.status_code == 401
+    assert "deleted" in status_res.json()["detail"].lower()
+
+    # 4. Retrying deletion succeeds when Supabase Auth becomes available
+    retry_res = client.delete("/api/v1/account", headers=_headers(user_id, email=test_email))
+    assert retry_res.status_code == 204
+
+
+def test_stale_jwt_access_rejected_on_all_endpoints(monkeypatch):
+    """Verify that every protected router rejects stale JWTs with 401 once account is deleted."""
+    user_id = uuid.uuid4()
+    test_email = "stale-jwt@example.com"
+    _seed_account(user_id, email=test_email)
+    admin = FakeAdmin()
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    # Delete the account
+    del_res = client.delete("/api/v1/account", headers=_headers(user_id, email=test_email))
+    assert del_res.status_code == 204
+
+    auth_header = _headers(user_id, email=test_email)
+
+    # All protected endpoints must return 401 Unauthorized
+    endpoints_to_test = [
+        ("GET", "/api/v1/policy/acceptance-status"),
+        ("POST", "/api/v1/policy/accept", {"policy_type": "terms_and_privacy", "policy_version": "v1.0"}),
+        ("GET", "/api/v1/profile"),
+        ("PATCH", "/api/v1/profile", {"headline": "New Title"}),
+        ("GET", "/api/v1/search-configs"),
+        ("GET", "/api/v1/jobs"),
+        ("GET", "/api/v1/applications"),
+        ("POST", "/api/v1/automation/runs", {"search_config_id": str(uuid.uuid4())}),
+        ("GET", "/api/v1/linkedin/status"),
+    ]
+
+    for item in endpoints_to_test:
+        method = item[0]
+        url = item[1]
+        payload = item[2] if len(item) > 2 else None
+
+        if method == "GET":
+            resp = client.get(url, headers=auth_header)
+        elif method == "POST":
+            resp = client.post(url, json=payload, headers=auth_header)
+        elif method == "PATCH":
+            resp = client.patch(url, json=payload, headers=auth_header)
+
+        assert resp.status_code == 401, f"{method} {url} returned {resp.status_code}"
+        assert "deleted" in resp.json()["detail"].lower()
+
+
+def test_fallback_email_reservation_when_email_missing(monkeypatch):
+    """When an account has no email recorded, a deterministic fallback reservation is still stored."""
+    user_id = uuid.uuid4()
+    _seed_account(user_id, email="")
+    admin = FakeAdmin()
+    monkeypatch.setattr("backend.app.services.account_service.get_supabase_admin_client", lambda: admin)
+
+    del_res = client.delete("/api/v1/account", headers=_headers(user_id, email=""))
+    assert del_res.status_code == 204
+
+    db = TestingSessionLocal()
+    reservation = db.query(EmailReservation).filter(EmailReservation.user_id == user_id).first()
+    assert reservation is not None
+    assert reservation.normalized_email == f"deleted-{user_id}@deleted.rolepilot.local"
+    db.close()
+
+

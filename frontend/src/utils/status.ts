@@ -229,21 +229,73 @@ export function getApplicationStatusMeta(status?: string | null): StatusMeta {
 export type CanonicalRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 /**
- * Normalizes automation run statuses.
+ * Normalizes automation run statuses into the canonical set.
  */
 export function normalizeRunStatus(status?: string | null): CanonicalRunStatus {
   if (!status) return 'queued';
   const norm = status.trim().toLowerCase();
-  if (norm === 'in_progress' || norm === 'active') return 'running';
-  if (norm === 'aborted' || norm === 'stopped') return 'cancelled';
-  if (norm === 'error') return 'failed';
-  if (norm === 'success' || norm === 'done') return 'completed';
+  if (norm === 'pending' || norm === 'waiting' || norm === 'queued') return 'queued';
+  if (norm === 'in_progress' || norm === 'active' || norm === 'running') return 'running';
+  if (norm === 'aborted' || norm === 'stopped' || norm === 'cancelled') return 'cancelled';
+  if (norm === 'error' || norm === 'failed' || norm === 'needs_reconciliation') return 'failed';
+  if (norm === 'success' || norm === 'done' || norm === 'completed') return 'completed';
 
   const canonicalRuns: CanonicalRunStatus[] = ['queued', 'running', 'completed', 'failed', 'cancelled'];
   if (canonicalRuns.includes(norm as CanonicalRunStatus)) {
     return norm as CanonicalRunStatus;
   }
   return 'running';
+}
+
+/**
+ * Checks whether an automation run has reached a final terminal state.
+ */
+export function isTerminalRunStatus(status?: string | null): boolean {
+  const norm = normalizeRunStatus(status);
+  return norm === 'completed' || norm === 'failed' || norm === 'cancelled';
+}
+
+/**
+ * Formats duration between run timestamps accurately.
+ * For terminal runs (completed/failed/cancelled), never displays 'In progress...'.
+ */
+export function formatRunDuration(
+  startedAt?: string | null,
+  completedAt?: string | null,
+  status?: string | null,
+  createdAt?: string | null
+): string {
+  const norm = normalizeRunStatus(status);
+  const isTerminal = norm === 'completed' || norm === 'failed' || norm === 'cancelled';
+
+  const startMs = startedAt ? new Date(startedAt).getTime() : (createdAt ? new Date(createdAt).getTime() : 0);
+  const endMs = completedAt ? new Date(completedAt).getTime() : 0;
+
+  if (startMs > 0 && endMs > 0 && endMs >= startMs) {
+    const diffMs = endMs - startMs;
+    const mins = Math.floor(diffMs / 60000);
+    const secs = Math.floor((diffMs % 60000) / 1000);
+    if (mins > 0) return `${mins} min ${secs} sec`;
+    return `${secs} sec`;
+  }
+
+  if (isTerminal) {
+    return '< 1 min';
+  }
+
+  if (norm === 'running' && startMs > 0) {
+    const diffMs = Math.max(0, Date.now() - startMs);
+    const mins = Math.floor(diffMs / 60000);
+    const secs = Math.floor((diffMs % 60000) / 1000);
+    if (mins > 0) return `${mins} min ${secs} sec`;
+    return `${secs} sec`;
+  }
+
+  if (norm === 'queued') {
+    return 'Waiting to start';
+  }
+
+  return 'In progress…';
 }
 
 /**

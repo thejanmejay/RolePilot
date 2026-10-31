@@ -6,15 +6,19 @@ export const automationApi = {
   /**
    * List all automation runs for authenticated user
    */
-  async getRuns(skip = 0, limit = 50): Promise<AutomationRun[]> {
-    return apiClient.get<AutomationRun[]>(`/api/v1/automation/runs?skip=${skip}&limit=${limit}`);
+  async getRuns(skip = 0, limit = 50, bypassCache = true): Promise<AutomationRun[]> {
+    return apiClient.get<AutomationRun[]>(`/api/v1/automation/runs?skip=${skip}&limit=${limit}`, {
+      bypassCache,
+    });
   },
 
   /**
    * Get single automation run by ID
    */
-  async getRunById(runId: string): Promise<AutomationRun> {
-    return apiClient.get<AutomationRun>(`/api/v1/automation/runs/${runId}`);
+  async getRunById(runId: string, bypassCache = true): Promise<AutomationRun> {
+    return apiClient.get<AutomationRun>(`/api/v1/automation/runs/${runId}`, {
+      bypassCache,
+    });
   },
 
   /**

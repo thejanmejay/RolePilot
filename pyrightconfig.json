@@ -1,0 +1,14 @@
+{
+  "include": [
+    "src",
+    "backend",
+    "tests"
+  ],
+  "extraPaths": [
+    ".",
+    "src"
+  ],
+  "pythonVersion": "3.11",
+  "venvPath": "linkedin-hunter",
+  "venv": ".venv"
+}

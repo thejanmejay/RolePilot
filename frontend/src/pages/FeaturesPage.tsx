@@ -34,6 +34,8 @@ export const FeaturesPage: React.FC<ContactPageProps> = ({
   onNavigateSecurity,
   onNavigateIntegrations,
   onNavigateContact,
+  isAuthenticated,
+  onNavigateDashboard,
 }) => {
   useEffect(() => {
     document.title = 'Product Features & Capabilities — RolePilot';
@@ -45,14 +47,18 @@ export const FeaturesPage: React.FC<ContactPageProps> = ({
       <header className="landing-header">
         <div className="landing-header-container">
           <div
-            onClick={onNavigateHome}
+            onClick={isAuthenticated && onNavigateDashboard ? onNavigateDashboard : onNavigateHome}
             className="auth-brand-logo"
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onNavigateHome();
+                if (isAuthenticated && onNavigateDashboard) {
+                  onNavigateDashboard();
+                } else {
+                  onNavigateHome();
+                }
               }
             }}
             aria-label="RolePilot Home"
@@ -70,22 +76,36 @@ export const FeaturesPage: React.FC<ContactPageProps> = ({
               <ArrowLeft size={16} />
               <span>Back to home</span>
             </button>
-            <button
-              type="button"
-              onClick={onNavigateLogin}
-              className="auth-btn-secondary landing-header-login-btn"
-            >
-              <LogIn size={16} />
-              <span>Log in</span>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateSignup}
-              className="landing-btn-hero-primary landing-header-cta-btn"
-            >
-              <span>Get started</span>
-              <ArrowRight size={16} />
-            </button>
+            {isAuthenticated && onNavigateDashboard ? (
+              <button
+                type="button"
+                onClick={onNavigateDashboard}
+                className="landing-btn-hero-primary landing-header-cta-btn"
+                aria-label="Go to your RolePilot dashboard"
+              >
+                <span>Dashboard</span>
+                <ArrowRight size={16} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onNavigateLogin}
+                  className="auth-btn-secondary landing-header-login-btn"
+                >
+                  <LogIn size={16} />
+                  <span>Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateSignup}
+                  className="landing-btn-hero-primary landing-header-cta-btn"
+                >
+                  <span>Get started</span>
+                  <ArrowRight size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -287,6 +307,8 @@ export const FeaturesPage: React.FC<ContactPageProps> = ({
         onNavigateContact={onNavigateContact}
         onNavigateLogin={onNavigateLogin}
         onNavigateSignup={onNavigateSignup}
+        isAuthenticated={isAuthenticated}
+        onNavigateDashboard={onNavigateDashboard}
       />
     </div>
   );

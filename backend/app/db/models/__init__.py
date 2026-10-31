@@ -13,6 +13,9 @@ from backend.app.db.models.resume import Resume
 from backend.app.db.models.search_config import SearchConfig
 from backend.app.db.models.skill import Skill
 from backend.app.db.models.policy_acceptance import UserPolicyAcceptance
+from backend.app.db.models.email_reservation import EmailReservation
+from backend.app.db.models.notification import Notification
+from backend.app.db.models.synced_job import SyncedJob
 
 __all__ = [
     "Profile",
@@ -28,4 +31,9 @@ __all__ = [
     "Application",
     "ApplicationAnswer",
     "UserPolicyAcceptance",
+    "EmailReservation",
+    "Notification",
+    "SyncedJob",
 ]
+
+

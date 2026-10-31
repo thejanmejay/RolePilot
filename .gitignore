@@ -4,6 +4,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+chrome-extension/rolepilot-build/
+chrome-extension/rolepilot/
+frontend/scripts/build-extension.mjs
+tests/test_extension_*
+scripts/run_real_chrome_acceptance.py
 .eggs/
 
 # Runtime data

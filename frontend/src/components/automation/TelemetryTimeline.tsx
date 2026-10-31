@@ -171,25 +171,36 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
   };
 
   return (
-    <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+    <div
+      className="card"
+      style={{
+        padding: '20px',
+        border: '1px solid #E5E7EB',
+        borderRadius: '12px',
+        backgroundColor: '#FFFFFF',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+        marginBottom: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '18px' }}>
         <div>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
+          <h3 style={{ fontSize: '1.02rem', fontWeight: 800, color: '#172554', margin: 0, letterSpacing: '-0.01em' }}>
             Vertical Telemetry Timeline
           </h3>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+          <p style={{ fontSize: '0.78rem', color: '#64748B', marginTop: '2px', marginBottom: 0 }}>
             Chronological step progression and modal state transitions
           </p>
         </div>
 
         <span
           style={{
-            fontSize: '0.75rem',
+            fontSize: '0.72rem',
             fontWeight: 700,
-            padding: '4px 10px',
-            borderRadius: 'var(--radius-full)',
-            backgroundColor: dryRun ? 'var(--primary-light)' : '#dcfce7',
-            color: dryRun ? 'var(--primary)' : '#15803d',
+            padding: '3px 10px',
+            borderRadius: '9999px',
+            backgroundColor: dryRun ? '#DBEAFE' : '#DCFCE7',
+            color: dryRun ? '#1769C2' : '#15803D',
+            border: dryRun ? '1px solid #BFDBFE' : '1px solid #BBF7D0',
           }}
         >
           {milestones.length} Milestones Recorded
@@ -204,15 +215,15 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
           const Icon = step.icon;
 
           const getStatusColor = () => {
-            if (step.status === 'blocked') return 'var(--primary)';
-            if (step.status === 'failed') return 'var(--danger)';
-            return '#16a34a';
+            if (step.status === 'blocked') return '#1769C2';
+            if (step.status === 'failed') return '#DC2626';
+            return '#16A34A';
           };
 
           const getStatusBg = () => {
-            if (step.status === 'blocked') return 'var(--primary-light)';
-            if (step.status === 'failed') return 'var(--danger-bg)';
-            return '#dcfce7';
+            if (step.status === 'blocked') return '#DBEAFE';
+            if (step.status === 'failed') return '#FEE2E2';
+            return '#DCFCE7';
           };
 
           return (
@@ -234,7 +245,7 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                     left: '17px',
                     bottom: '0',
                     width: '2px',
-                    backgroundColor: 'var(--border-light)',
+                    backgroundColor: '#E5E7EB',
                     zIndex: 0,
                   }}
                   aria-hidden="true"
@@ -256,7 +267,7 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                   fontSize: '0.75rem',
                   flexShrink: 0,
                   zIndex: 1,
-                  boxShadow: '0 0 0 4px #ffffff',
+                  boxShadow: '0 0 0 4px #FFFFFF',
                 }}
               >
                 <Icon size={18} />
@@ -267,11 +278,11 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  backgroundColor: '#ffffff',
-                  border: '1px solid var(--border-light)',
-                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '10px',
                   padding: '12px 14px',
-                  boxShadow: 'var(--shadow-sm)',
+                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
                 }}
               >
                 <div
@@ -284,43 +295,52 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                   }}
                   onClick={() => step.metadata && toggleExpand(step.id)}
                 >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span
                         style={{
-                          fontSize: '0.7rem',
+                          fontSize: '0.68rem',
                           fontWeight: 800,
-                          backgroundColor: 'var(--bg-subtle)',
-                          color: 'var(--text-muted)',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
+                          backgroundColor: '#F1F5F9',
+                          color: '#475569',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
                         }}
                       >
                         {step.stepNumber}
                       </span>
                       <h4
                         style={{
-                          fontSize: '0.9rem',
+                          fontSize: '0.88rem',
                           fontWeight: 700,
-                          color: 'var(--text-main)',
+                          color: '#172554',
                           margin: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          overflowWrap: 'anywhere',
+                          wordBreak: 'break-word',
                         }}
                       >
                         {step.title}
                       </h4>
                     </div>
 
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                    <p
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#64748B',
+                        marginTop: '4px',
+                        marginBottom: 0,
+                        lineHeight: 1.45,
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                    >
                       {step.subtitle}
                     </p>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                     {step.timestamp && (
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <span style={{ fontSize: '0.72rem', color: '#64748B', display: 'flex', alignItems: 'center', gap: '3px' }}>
                         <Clock size={11} />
                         <span>{new Date(step.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                       </span>
@@ -332,7 +352,7 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                         style={{ width: '24px', height: '24px', padding: 0 }}
                         title="Toggle Telemetry JSON"
                       >
-                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        {isExpanded ? <ChevronDown size={14} color="#64748B" /> : <ChevronRight size={14} color="#64748B" />}
                       </button>
                     )}
                   </div>
@@ -341,18 +361,19 @@ export const TelemetryTimeline: React.FC<TelemetryTimelineProps> = ({
                 {/* Expandable Metadata JSON Tree */}
                 {isExpanded && step.metadata && (
                   <div
+                    className="custom-scrollbar"
                     style={{
                       marginTop: '10px',
                       padding: '10px 12px',
-                      backgroundColor: '#0f172a',
-                      borderRadius: 'var(--radius-sm)',
-                      color: '#38bdf8',
-                      fontFamily: 'monospace',
-                      fontSize: '0.75rem',
+                      backgroundColor: '#0F172A',
+                      borderRadius: '8px',
+                      color: '#38BDF8',
+                      fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                      fontSize: '0.74rem',
                       overflowX: 'auto',
                     }}
                   >
-                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '4px', fontWeight: 700 }}>
+                    <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: '4px', fontWeight: 700 }}>
                       TELEMETRY PAYLOAD
                     </div>
                     <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>

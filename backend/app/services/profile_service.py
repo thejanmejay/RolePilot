@@ -24,6 +24,15 @@ from backend.app.schemas.profile import (
 class ProfileService:
     @staticmethod
     def get_or_create_profile(db: Session, user_id: uuid.UUID) -> Profile:
+        from backend.app.services.account_service import AccountService
+
+        if AccountService.is_account_deleted(db, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This account has been deleted.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         stmt = (
             select(Profile)
             .where(Profile.id == user_id)
@@ -35,7 +44,7 @@ class ProfileService:
         )
         profile = db.execute(stmt).scalar_one_or_none()
         if not profile:
-            profile = Profile(id=user_id, first_name="Candidate")
+            profile = Profile(id=user_id, first_name="Candidate", last_name="")
             db.add(profile)
             db.commit()
             db.refresh(profile)
@@ -186,9 +195,43 @@ class ProfileService:
     def add_skills(
         db: Session, user_id: uuid.UUID, skills_in: List[SkillCreate]
     ) -> List[Skill]:
+        if not skills_in:
+            return []
+
+        # Batch query existing skills in 1 roundtrip
+        existing_skills = db.execute(
+            select(Skill).where(Skill.user_id == user_id)
+        ).scalars().all()
+        existing_map = {s.name.strip().lower(): s for s in existing_skills}
+
         created = []
         for skill_in in skills_in:
-            created.append(ProfileService.add_skill(db, user_id, skill_in))
+            clean_name = skill_in.name.strip()
+            if not clean_name:
+                continue
+            years = max(0, skill_in.years if skill_in.years is not None else 1)
+            months = max(0, min(11, skill_in.months if skill_in.months is not None else 0))
+
+            key = clean_name.lower()
+            if key in existing_map:
+                existing = existing_map[key]
+                existing.years = years
+                existing.months = months
+                existing.name = clean_name
+                created.append(existing)
+            else:
+                new_skill = Skill(
+                    user_id=user_id,
+                    name=clean_name,
+                    years=years,
+                    months=months,
+                )
+                db.add(new_skill)
+                existing_map[key] = new_skill
+                created.append(new_skill)
+
+        # Single atomic commit for all skills
+        db.commit()
         return created
 
     @staticmethod
