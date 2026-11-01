@@ -1118,5 +1118,162 @@ def test_provenance_heuristic_limitations_and_edge_cases():
     assert any("NewCo" in e["company_name"] for e in exps)
 
 
+def test_fastapi_route_level_minimum_required_matrix():
+    """Verify all 11 required route-level scenarios directly against FastAPI client endpoints.
+
+    Tests:
+    1. Valid PDF upload -> 201 Created, is_active=True, verified.
+    2. Corrupted PDF upload -> 422 Unprocessable Entity (fail-closed, no record committed).
+    3. Non-PDF file disguised as PDF -> 400 Bad Request.
+    4. Missing storage object preview -> 404 Not Found.
+    5. Replacement upload -> 201 Created, is_active=False (draft-first).
+    6. Activation of an unverified resume -> 400 Bad Request.
+    7. Activation of another user's resume -> 404 Not Found.
+    8. Preview of an existing physical PDF -> 200 OK, application/pdf streaming.
+    9. Preview when the physical PDF is missing -> 404 Not Found.
+    10. Deletion of an active resume -> 204 No Content, verified fallback activated.
+    11. Deletion of a missing or corrupted physical file -> 204 No Content (unblocked).
+    """
+    headers_a, uid_a = get_fresh_user_headers()
+    headers_b, uid_b = get_fresh_user_headers()
+
+    # 1. Valid PDF upload -> 201 Created
+    valid_files = {"file": ("valid_resume.pdf", io.BytesIO(SAMPLE_PDF_HEADER), "application/pdf")}
+    res_valid = client.post("/api/v1/resumes/upload", files=valid_files, headers=headers_a)
+    assert res_valid.status_code == 201
+    r_v1 = res_valid.json()
+    assert r_v1["is_active"] is True
+    assert r_v1["is_valid_document"] is True
+    assert r_v1["document_status"] == "verified"
+    v1_id = r_v1["id"]
+
+    # 2. Corrupted PDF upload -> 422 Unprocessable Entity
+    # Corrupted: starts with %PDF- header but contains unparseable binary junk (no xref/catalog/pages)
+    corrupted_bytes = b"%PDF-1.4\nBROKEN_UNPARSEABLE_CORRUPTED_STREAM_CONTENT_NO_PAGES\n%%EOF"
+    bad_files = {"file": ("corrupted.pdf", io.BytesIO(corrupted_bytes), "application/pdf")}
+    res_corrupt = client.post("/api/v1/resumes/upload", files=bad_files, headers=headers_a)
+    assert res_corrupt.status_code == 422
+    assert "failed verification" in res_corrupt.json()["detail"]
+
+    # Invariant: Corrupted upload must NOT leave an orphaned record in DB
+    db = next(get_db())
+    try:
+        user_resumes = db.execute(select(Resume).where(Resume.user_id == uid_a)).scalars().all()
+        assert len(user_resumes) == 1
+        assert user_resumes[0].id == uuid.UUID(v1_id)
+    finally:
+        db.close()
+
+    # 3. Non-PDF file disguised as PDF -> 400 Bad Request
+    fake_pdf = {"file": ("script.pdf", io.BytesIO(b"#!/bin/bash\necho exploit"), "application/pdf")}
+    res_fake = client.post("/api/v1/resumes/upload", files=fake_pdf, headers=headers_a)
+    assert res_fake.status_code == 400
+    assert "missing or corrupted" in res_fake.json()["detail"]
+
+    # 4. Replacement upload -> 201 Created, is_active=False
+    replace_files = {"file": ("valid_v2.pdf", io.BytesIO(REPLACEMENT_PDF_HEADER), "application/pdf")}
+    res_repl = client.post("/api/v1/resumes/replace", files=replace_files, headers=headers_a)
+    assert res_repl.status_code == 201
+    repl_data = res_repl.json()
+    r_v2 = repl_data["new_resume"]
+    assert r_v2["version"] == 2
+    assert r_v2["is_active"] is False  # Draft-first isolation
+    assert r_v2["is_valid_document"] is True
+    assert r_v2["document_status"] == "verified"
+    v2_id = r_v2["id"]
+
+    # Verify v1 is STILL active in DB
+    db = next(get_db())
+    try:
+        v1_db = db.execute(select(Resume).where(Resume.id == uuid.UUID(v1_id))).scalar_one()
+        assert v1_db.is_active is True
+    finally:
+        db.close()
+
+    # 5. Activation of another user's resume -> 404 Not Found (Cross-User Isolation)
+    res_cross_act = client.post(
+        f"/api/v1/resumes/{v2_id}/activate",
+        json={"add_skills": True},
+        headers=headers_b,
+    )
+    assert res_cross_act.status_code == 404
+
+    # 6. Activation of an unverified resume -> 400 Bad Request
+    # Seed an unverified resume directly into DB
+    db = next(get_db())
+    try:
+        unverified_id = uuid.uuid4()
+        unverified_resume = Resume(
+            id=unverified_id,
+            user_id=uid_a,
+            file_name="unverified.pdf",
+            storage_path=f"resumes/{uid_a}/unverified.pdf",
+            version=99,
+            is_active=False,
+            is_valid_document=False,
+            document_status="pending_verification",
+            file_mime_type="application/pdf",
+        )
+        db.add(unverified_resume)
+        db.commit()
+    finally:
+        db.close()
+
+    res_unver_act = client.post(
+        f"/api/v1/resumes/{unverified_id}/activate",
+        json={"add_skills": True},
+        headers=headers_a,
+    )
+    assert res_unver_act.status_code == 400
+    assert "Only verified resumes can be activated" in res_unver_act.json()["detail"]
+
+    # 7. Preview of an existing physical PDF -> 200 OK
+    res_prev = client.get(f"/api/v1/resumes/{v1_id}/file", headers=headers_a)
+    assert res_prev.status_code == 200
+    assert res_prev.headers["content-type"] == "application/pdf"
+    assert res_prev.content == SAMPLE_PDF_HEADER
+
+    # 8. Preview when the physical PDF is missing -> 404 Not Found (Fail-closed)
+    res_prev_missing = client.get(f"/api/v1/resumes/{unverified_id}/file", headers=headers_a)
+    assert res_prev_missing.status_code == 404
+    assert "not found in physical storage" in res_prev_missing.json()["detail"]
+
+    # 9. Successful Activation of replacement resume v2 -> 200 OK
+    res_act = client.post(
+        f"/api/v1/resumes/{v2_id}/activate",
+        json={"add_skills": True, "add_experiences": True, "add_educations": True},
+        headers=headers_a,
+    )
+    assert res_act.status_code == 200
+    act_data = res_act.json()
+    assert act_data["resume"]["is_active"] is True
+
+    # 10. Deletion of an active resume -> 204 No Content, verified fallback v1 reactivated
+    res_del_act = client.delete(f"/api/v1/resumes/{v2_id}", headers=headers_a)
+    assert res_del_act.status_code == 204
+
+    # Verify fallback to v1 happened automatically
+    db = next(get_db())
+    try:
+        v1_after_del = db.execute(select(Resume).where(Resume.id == uuid.UUID(v1_id))).scalar_one()
+        assert v1_after_del.is_active is True
+    finally:
+        db.close()
+
+    # 11. Deletion of a resume whose physical file is missing or corrupted -> 204 No Content
+    # unverified_resume has NO physical file on disk or Supabase
+    res_del_missing = client.delete(f"/api/v1/resumes/{unverified_id}", headers=headers_a)
+    assert res_del_missing.status_code == 204  # Must NOT be blocked!
+
+    # Verify it is deleted from DB
+    db = next(get_db())
+    try:
+        gone = db.execute(select(Resume).where(Resume.id == unverified_id)).scalar_one_or_none()
+        assert gone is None
+    finally:
+        db.close()
+
+
+
 
 

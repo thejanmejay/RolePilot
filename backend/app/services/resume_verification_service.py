@@ -32,6 +32,7 @@ class ResumeVerificationService:
         db: Session,
         user_id: uuid.UUID,
         resume_id: uuid.UUID,
+        auto_commit: bool = True,
     ) -> Tuple[bool, str]:
         """Verify storage object existence, magic bytes, and parseability.
 
@@ -48,7 +49,7 @@ class ResumeVerificationService:
             return False, "not_found"
 
         if not resume.storage_path or not resume.storage_path.strip():
-            cls._update_db_status(db, resume_id, False, "missing_storage", "unknown")
+            cls._update_db_status(db, resume_id, False, "missing_storage", "unknown", auto_commit=auto_commit)
             return False, "missing_storage"
 
         # 1. Fetch physical bytes (local storage or Supabase Storage)
@@ -60,7 +61,7 @@ class ResumeVerificationService:
                 user_id,
                 resume.storage_path,
             )
-            cls._update_db_status(db, resume_id, False, "missing_storage", "unknown")
+            cls._update_db_status(db, resume_id, False, "missing_storage", "unknown", auto_commit=auto_commit)
             return False, "missing_storage"
 
         # 2. Validate PDF magic bytes
@@ -71,7 +72,7 @@ class ResumeVerificationService:
                 resume_id,
                 user_id,
             )
-            cls._update_db_status(db, resume_id, False, "unsupported_format", detected_mime)
+            cls._update_db_status(db, resume_id, False, "unsupported_format", detected_mime, auto_commit=auto_commit)
             return False, "unsupported_format"
 
         # 3. Validate parseability with pdfplumber
@@ -79,7 +80,7 @@ class ResumeVerificationService:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                 page_count = len(pdf.pages)
                 if page_count == 0:
-                    cls._update_db_status(db, resume_id, False, "corrupt", "application/pdf")
+                    cls._update_db_status(db, resume_id, False, "corrupt", "application/pdf", auto_commit=auto_commit)
                     return False, "corrupt"
                 # Touch first page to trigger raster/stream parsing
                 _ = pdf.pages[0].extract_text()
@@ -87,11 +88,11 @@ class ResumeVerificationService:
             logger.warning(
                 "Resume %s corrupted or unparseable: %s", resume_id, parse_err
             )
-            cls._update_db_status(db, resume_id, False, "corrupt", "application/pdf")
+            cls._update_db_status(db, resume_id, False, "corrupt", "application/pdf", auto_commit=auto_commit)
             return False, "corrupt"
 
         # 4. Success: document verified
-        cls._update_db_status(db, resume_id, True, "verified", "application/pdf")
+        cls._update_db_status(db, resume_id, True, "verified", "application/pdf", auto_commit=auto_commit)
         return True, "verified"
 
     @classmethod
@@ -136,6 +137,7 @@ class ResumeVerificationService:
         is_valid: bool,
         status_value: str,
         mime_type: str,
+        auto_commit: bool = True,
     ) -> None:
         """Update validity metadata in the database."""
         # Using raw update statement to be compatible whether or not SQLAlchemy ORM model is mapped
@@ -148,7 +150,8 @@ class ResumeVerificationService:
                 file_mime_type=mime_type,
             )
         )
-        db.commit()
+        if auto_commit:
+            db.commit()
 
     @classmethod
     def verify_all_pending_resumes(

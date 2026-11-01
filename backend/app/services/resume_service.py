@@ -210,7 +210,7 @@ class ResumeService:
         except Exception as e:
             logger.warning("PDF text extraction warning: %s", e)
 
-        # 5. Insert unverified draft resume record into DB
+        # 5. Insert unverified draft resume record into DB transaction
         resume = Resume(
             id=resume_id,
             user_id=user_id,
@@ -225,19 +225,23 @@ class ResumeService:
             parsed_data=parsed_data,
         )
         db.add(resume)
-        db.commit()
-        db.refresh(resume)
+        db.flush()
 
-        # 6. Invoke ResumeVerificationService to verify physical storage & parseability
-        is_valid, doc_status = ResumeVerificationService.verify_resume_document(db, user_id, resume_id)
+        # 6. Invoke ResumeVerificationService to verify physical storage & parseability (without auto-commit to preserve caller transaction)
+        is_valid, doc_status = ResumeVerificationService.verify_resume_document(db, user_id, resume_id, auto_commit=False)
         if not is_valid:
-            # Clean up local file on verification failure
+            db.rollback()
             try:
                 local_path = get_local_resume_path(user_id, resume_id)
                 if local_path.is_file():
                     local_path.unlink()
             except Exception:
                 pass
+            if supabase_saved and supabase:
+                try:
+                    supabase.storage.from_(settings.RESUME_STORAGE_BUCKET).remove([storage_path])
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Uploaded resume failed verification: {doc_status}.",
@@ -506,18 +510,23 @@ class ResumeService:
             file_mime_type="application/pdf",
         )
         db.add(new_resume)
-        db.commit()
-        db.refresh(new_resume)
+        db.flush()
 
-        # 5. Invoke ResumeVerificationService to verify physical storage and PDF structure
-        is_valid, doc_status = ResumeVerificationService.verify_resume_document(db, user_id, resume_id)
+        # 5. Invoke ResumeVerificationService to verify physical storage and PDF structure (without auto-commit)
+        is_valid, doc_status = ResumeVerificationService.verify_resume_document(db, user_id, resume_id, auto_commit=False)
         if not is_valid:
+            db.rollback()
             try:
                 local_path = get_local_resume_path(user_id, resume_id)
                 if local_path.is_file():
                     local_path.unlink()
             except Exception:
                 pass
+            if supabase_saved and supabase:
+                try:
+                    supabase.storage.from_(settings.RESUME_STORAGE_BUCKET).remove([storage_path])
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Replacement resume failed verification: {doc_status}.",
@@ -530,6 +539,18 @@ class ResumeService:
             parsed_data = ResumeParser.parse_pdf(content)
             parsed_text = ResumeParser.extract_text(content)
         except Exception as e:
+            db.rollback()
+            try:
+                local_path = get_local_resume_path(user_id, resume_id)
+                if local_path.is_file():
+                    local_path.unlink()
+            except Exception:
+                pass
+            if supabase_saved and supabase:
+                try:
+                    supabase.storage.from_(settings.RESUME_STORAGE_BUCKET).remove([storage_path])
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unable to parse candidate resume: {str(e)}",
@@ -537,16 +558,13 @@ class ResumeService:
 
         new_resume.parsed_data = parsed_data
         new_resume.parsed_text = parsed_text
-        db.commit()
-        db.refresh(new_resume)
 
         # 7. Fetch profile and compute diff
         profile = db.execute(select(Profile).where(Profile.id == user_id)).scalar_one_or_none()
         if not profile:
             profile = Profile(id=user_id)
             db.add(profile)
-            db.commit()
-            db.refresh(profile)
+            db.flush()
 
         existing_skills = list(db.execute(select(Skill).where(Skill.user_id == user_id)).scalars().all())
         existing_exps = list(db.execute(select(Experience).where(Experience.user_id == user_id)).scalars().all())
@@ -555,6 +573,9 @@ class ResumeService:
         diff = ResumeService.compute_profile_diff(
             profile, parsed_data, existing_skills, existing_exps, existing_edus
         )
+
+        db.commit()
+        db.refresh(new_resume)
 
         return ResumeReplacementResponse(
             new_resume=ResumeResponse.model_validate(new_resume),
@@ -869,7 +890,7 @@ class ResumeService:
 
         # If deleted resume was active, fallback to next most recent verified resume
         if was_active:
-            fallback = db.execute(
+            candidates = db.execute(
                 select(Resume)
                 .where(
                     Resume.user_id == user_id,
@@ -877,7 +898,14 @@ class ResumeService:
                     Resume.document_status == "verified",
                 )
                 .order_by(Resume.version.desc())
-            ).scalars().first()
+            ).scalars().all()
+
+            fallback = None
+            for cand in candidates:
+                is_valid, _ = ResumeVerificationService.verify_resume_document(db, user_id, cand.id, auto_commit=False)
+                if is_valid:
+                    fallback = cand
+                    break
 
             if fallback:
                 fallback.is_active = True
