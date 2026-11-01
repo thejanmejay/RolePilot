@@ -11,6 +11,7 @@ Validates all Gate 1 database architecture criteria:
 8. Backend resume verification service validates physical storage, PDF magic bytes, and parseability.
 """
 
+import multiprocessing
 import os
 import threading
 import time
@@ -19,6 +20,36 @@ import pytest
 import psycopg
 
 PG_URL = os.getenv("TEST_POSTGRES_URL", "postgresql://localhost:55432/rolepilot_test")
+
+
+def _worker_activate_resume_proc(pg_url: str, user_id: uuid.UUID, resume_id: uuid.UUID, out_queue):
+    """Independent OS process worker invoking ResumeService.activate_resume_and_sync_profile."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from backend.app.services.resume_service import ResumeService
+    from backend.app.schemas.resume import ResumeActivationRequest
+
+    engine = create_engine(pg_url, pool_pre_ping=True)
+    payload = ResumeActivationRequest(
+        accepted_fields={},
+        add_skills=True,
+        add_experiences=True,
+        add_educations=True,
+        clear_stale_fields=True,
+    )
+    try:
+        with Session(engine) as db:
+            resp = ResumeService.activate_resume_and_sync_profile(
+                db=db,
+                user_id=user_id,
+                resume_id=resume_id,
+                payload=payload,
+            )
+            out_queue.put({"success": True, "active_id": str(resp.resume.id), "error": None})
+    except Exception as exc:
+        out_queue.put({"success": False, "active_id": None, "error": str(exc)})
+    finally:
+        engine.dispose()
 
 
 def is_postgres_available() -> bool:
@@ -85,7 +116,26 @@ def setup_base_schema(conn: psycopg.Connection):
                 first_name VARCHAR(100),
                 last_name VARCHAR(100),
                 email VARCHAR(255) UNIQUE NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT now()
+                phone VARCHAR(50),
+                city VARCHAR(100),
+                state VARCHAR(100),
+                country VARCHAR(100) DEFAULT 'India',
+                linkedin_url TEXT,
+                github_url TEXT,
+                website_url TEXT,
+                headline TEXT,
+                target_role TEXT,
+                experience_years INTEGER NOT NULL DEFAULT 0,
+                experience_months INTEGER NOT NULL DEFAULT 0,
+                notice_period_days INTEGER NOT NULL DEFAULT 30,
+                current_ctc NUMERIC,
+                expected_ctc NUMERIC,
+                authorized_to_work BOOLEAN NOT NULL DEFAULT true,
+                willing_to_relocate BOOLEAN NOT NULL DEFAULT true,
+                onboarding_completed BOOLEAN NOT NULL DEFAULT false,
+                onboarding_completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
             );
 
             CREATE TABLE public.resumes (
@@ -105,7 +155,11 @@ def setup_base_schema(conn: psycopg.Connection):
                 user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
                 company_name VARCHAR(255) NOT NULL,
                 job_title VARCHAR(255) NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT now()
+                start_date DATE,
+                end_date DATE,
+                description TEXT,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
             );
 
             CREATE TABLE public.educations (
@@ -113,14 +167,23 @@ def setup_base_schema(conn: psycopg.Connection):
                 user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
                 institution VARCHAR(255) NOT NULL,
                 degree VARCHAR(100),
-                created_at TIMESTAMPTZ DEFAULT now()
+                field_of_study VARCHAR(100),
+                start_year VARCHAR(10),
+                end_year VARCHAR(10),
+                description TEXT,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
             );
 
             CREATE TABLE public.skills (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
                 name VARCHAR(100) NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT now()
+                years INTEGER NOT NULL DEFAULT 0,
+                months INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now(),
+                CONSTRAINT uq_skills_user_id_name UNIQUE (user_id, name)
             );
 
             CREATE TABLE public.job_descriptions (
@@ -1077,3 +1140,165 @@ def test_07_backend_resume_verification_service(pg_conn):
         summary = ResumeVerificationService.verify_all_pending_resumes(db, user_id=user)
         # All were processed individually above, so pending count is 0
         assert sum(summary.values()) == 0
+
+
+def test_08_postgres_resume_service_pointer_sync_and_cross_process_concurrency(pg_conn):
+    """Test Requirement 9: ResumeService pointer synchronization on PostgreSQL without source_type,
+
+    dual-pointer synchronization with Resume.is_active, cross-process concurrency serialization,
+    and rollback behavior on failed activation.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from fastapi import HTTPException
+    from backend.app.services.resume_service import ResumeService, save_local_resume_bytes
+    from backend.app.schemas.resume import ResumeActivationRequest
+
+    pg_conn.rollback()
+    test_engine = create_engine(PG_URL, pool_pre_ping=True)
+
+    valid_pdf_bytes = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+        b"4 0 obj\n<< /Length 50 >>\nstream\nBT /F1 12 Tf 72 712 Td (Verified Candidate Resume) Tj ET\nendstream\nendobj\n"
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        b"xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000244 00000 n \n0000000345 00000 n \n"
+        b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n426\n%%EOF"
+    )
+
+    user = uuid.uuid4()
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO public.profiles (id, email) VALUES (%s, %s)", (user, f"sync_svc_{uuid.uuid4().hex[:6]}@test.com"))
+
+    res1 = uuid.uuid4()
+    res2 = uuid.uuid4()
+    save_local_resume_bytes(user, res1, valid_pdf_bytes)
+    save_local_resume_bytes(user, res2, valid_pdf_bytes)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.resumes (id, user_id, file_name, storage_path, version, is_active, is_valid_document, document_status, file_mime_type)
+            VALUES (%s, %s, 'r1.pdf', 'resumes/r1.pdf', 1, false, true, 'verified', 'application/pdf'),
+                   (%s, %s, 'r2.pdf', 'resumes/r2.pdf', 2, false, true, 'verified', 'application/pdf');
+        """, (res1, user, res2, user))
+
+    payload = ResumeActivationRequest(
+        accepted_fields={},
+        add_skills=True,
+        add_experiences=True,
+        add_educations=True,
+        clear_stale_fields=True,
+    )
+
+    # 1. Activate res1 using ResumeService directly against real PostgreSQL
+    with Session(test_engine) as db:
+        resp1 = ResumeService.activate_resume_and_sync_profile(db, user, res1, payload)
+        assert resp1.resume.id == res1
+        assert resp1.resume.is_active is True
+
+    # Verify both System A (Resume.is_active) and System B (active_application_resumes) in PostgreSQL
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT id, is_active FROM public.resumes WHERE user_id = %s ORDER BY version ASC", (user,))
+        rows = cur.fetchall()
+        assert rows[0][1] is True  # res1 is active
+        assert rows[1][1] is False  # res2 is inactive
+
+        cur.execute("SELECT uploaded_resume_id, studio_document_id FROM public.active_application_resumes WHERE user_id = %s", (user,))
+        act_row = cur.fetchone()
+        assert act_row is not None
+        assert act_row[0] == res1
+        assert act_row[1] is None  # studio_document_id is NULL
+
+    # 2. Activate res2 (replacement) and verify atomic pointer transition
+    with Session(test_engine) as db:
+        resp2 = ResumeService.activate_resume_and_sync_profile(db, user, res2, payload)
+        assert resp2.resume.id == res2
+        assert resp2.resume.is_active is True
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT id, is_active FROM public.resumes WHERE user_id = %s ORDER BY version ASC", (user,))
+        rows = cur.fetchall()
+        assert rows[0][1] is False  # res1 deactivated
+        assert rows[1][1] is True  # res2 activated
+
+        cur.execute("SELECT uploaded_resume_id, studio_document_id FROM public.active_application_resumes WHERE user_id = %s", (user,))
+        act_row = cur.fetchone()
+        assert act_row[0] == res2
+        assert act_row[1] is None
+
+    # 3. Concurrency test: Two independent OS processes attempting concurrent activation
+    c_user = uuid.uuid4()
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO public.profiles (id, email) VALUES (%s, %s)", (c_user, f"concurrent_{uuid.uuid4().hex[:6]}@test.com"))
+
+    c_res1 = uuid.uuid4()
+    c_res2 = uuid.uuid4()
+    save_local_resume_bytes(c_user, c_res1, valid_pdf_bytes)
+    save_local_resume_bytes(c_user, c_res2, valid_pdf_bytes)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.resumes (id, user_id, file_name, storage_path, version, is_active, is_valid_document, document_status, file_mime_type)
+            VALUES (%s, %s, 'c1.pdf', 'resumes/c1.pdf', 1, false, true, 'verified', 'application/pdf'),
+                   (%s, %s, 'c2.pdf', 'resumes/c2.pdf', 2, false, true, 'verified', 'application/pdf');
+        """, (c_res1, c_user, c_res2, c_user))
+
+    ctx = multiprocessing.get_context("spawn")
+    q1 = ctx.Queue()
+    q2 = ctx.Queue()
+
+    p1 = ctx.Process(target=_worker_activate_resume_proc, args=(PG_URL, c_user, c_res1, q1))
+    p2 = ctx.Process(target=_worker_activate_resume_proc, args=(PG_URL, c_user, c_res2, q2))
+
+    p1.start()
+    p2.start()
+    p1.join(timeout=10)
+    p2.join(timeout=10)
+
+    res1_out = q1.get(timeout=2)
+    res2_out = q2.get(timeout=2)
+
+    assert res1_out["success"] is True, f"Worker 1 failed: {res1_out['error']}"
+    assert res2_out["success"] is True, f"Worker 2 failed: {res2_out['error']}"
+
+    # Verify exactly ONE resume is active in public.resumes
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT id FROM public.resumes WHERE user_id = %s AND is_active = true", (c_user,))
+        active_resumes = cur.fetchall()
+        assert len(active_resumes) == 1, f"Expected exactly 1 active resume, found: {active_resumes}"
+        final_active_id = active_resumes[0][0]
+
+        # Verify active_application_resumes points to that exact same resume
+        cur.execute("SELECT uploaded_resume_id, studio_document_id FROM public.active_application_resumes WHERE user_id = %s", (c_user,))
+        act_row = cur.fetchone()
+        assert act_row is not None
+        assert act_row[0] == final_active_id
+        assert act_row[1] is None
+
+    # 4. Rollback and retry behavior: Attempting to activate an unverified resume
+    unverified_res = uuid.uuid4()
+    with pg_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.resumes (id, user_id, file_name, storage_path, version, is_active, is_valid_document, document_status, file_mime_type)
+            VALUES (%s, %s, 'unverif.pdf', 'resumes/unverif.pdf', 3, false, false, 'pending_verification', 'application/pdf');
+        """, (unverified_res, c_user))
+
+    with Session(test_engine) as db:
+        with pytest.raises(HTTPException) as exc_info:
+            ResumeService.activate_resume_and_sync_profile(db, c_user, unverified_res, payload)
+        assert exc_info.value.status_code == 400
+
+    # Ensure previous active state is completely unchanged
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT id FROM public.resumes WHERE user_id = %s AND is_active = true", (c_user,))
+        active_after_abort = cur.fetchall()
+        assert len(active_after_abort) == 1
+        assert active_after_abort[0][0] == final_active_id
+
+        cur.execute("SELECT uploaded_resume_id, studio_document_id FROM public.active_application_resumes WHERE user_id = %s", (c_user,))
+        act_after = cur.fetchone()
+        assert act_after[0] == final_active_id
+        assert act_after[1] is None
+

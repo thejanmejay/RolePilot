@@ -122,20 +122,24 @@ class ResumeService:
     ) -> None:
         """Synchronize the active_application_resumes table so both System A and System B are identical."""
         try:
-            db.execute(
-                text("""
-                    INSERT INTO public.active_application_resumes (user_id, source_type, uploaded_resume_id, updated_at)
-                    VALUES (:user_id, 'uploaded', :resume_id, now())
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        source_type = 'uploaded',
-                        uploaded_resume_id = :resume_id,
-                        studio_document_id = NULL,
-                        updated_at = now();
-                """),
-                {"user_id": user_id, "resume_id": resume_id},
-            )
+            bind = db.get_bind()
+            if bind and bind.dialect.name == "postgresql":
+                db.execute(
+                    text("""
+                        INSERT INTO public.active_application_resumes (user_id, uploaded_resume_id, updated_at)
+                        VALUES (:user_id, :resume_id, now())
+                        ON CONFLICT (user_id) DO UPDATE SET
+                            uploaded_resume_id = :resume_id,
+                            studio_document_id = NULL,
+                            updated_at = now();
+                    """),
+                    {"user_id": user_id, "resume_id": resume_id},
+                )
         except Exception as e:
-            logger.debug("active_application_resumes sync skipped or failed: %s", e)
+            logger.warning("active_application_resumes sync skipped or failed: %s", e)
+            bind = getattr(db, "get_bind", lambda: None)()
+            if bind and bind.dialect.name == "postgresql":
+                raise
 
     @staticmethod
     def _clear_active_application_resume_pointer(
@@ -143,12 +147,17 @@ class ResumeService:
     ) -> None:
         """Clear active pointer from active_application_resumes table."""
         try:
-            db.execute(
-                text("DELETE FROM public.active_application_resumes WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            )
+            bind = db.get_bind()
+            if bind and bind.dialect.name == "postgresql":
+                db.execute(
+                    text("DELETE FROM public.active_application_resumes WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                )
         except Exception as e:
-            logger.debug("active_application_resumes clear skipped or failed: %s", e)
+            logger.warning("active_application_resumes clear skipped or failed: %s", e)
+            bind = getattr(db, "get_bind", lambda: None)()
+            if bind and bind.dialect.name == "postgresql":
+                raise
 
     @staticmethod
     async def upload_and_create_resume(
@@ -612,7 +621,8 @@ class ResumeService:
     ) -> ResumeActivationResponse:
         """Activate the replacement resume version and apply candidate profile updates."""
         with _get_user_activation_lock(user_id):
-            if db.bind and db.bind.dialect.name == "postgresql":
+            bind = db.get_bind()
+            if bind and bind.dialect.name == "postgresql":
                 # PostgreSQL transaction-level advisory lock serializes concurrent activations per user across all workers/processes
                 db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:uid))"), {"uid": str(user_id)})
 
