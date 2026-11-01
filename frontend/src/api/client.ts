@@ -79,6 +79,7 @@ export interface ApiRequestOptions extends RequestInit {
   bypassCache?: boolean;
   cacheTtlMs?: number;
   noCache?: boolean;
+  responseType?: 'json' | 'blob' | 'text';
 }
 
 interface CacheRecord<T> {
@@ -209,6 +210,11 @@ async function request<T>(endpoint: string, options: ApiRequestOptions = {}): Pr
       return {} as T;
     }
 
+    if (response.ok && (options.responseType === 'blob' || response.headers.get('content-type')?.includes('application/pdf'))) {
+      const blobData = await response.blob();
+      return blobData as unknown as T;
+    }
+
     let data: any = null;
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
@@ -276,6 +282,9 @@ export const apiClient = {
 
   getFresh: <T>(endpoint: string, options?: ApiRequestOptions) =>
     request<T>(endpoint, { ...options, method: 'GET', bypassCache: true }),
+
+  getBlob: (endpoint: string, options?: ApiRequestOptions) =>
+    request<Blob>(endpoint, { ...options, method: 'GET', responseType: 'blob', bypassCache: true, noCache: true }),
 
   post: <T>(endpoint: string, body?: any, options?: ApiRequestOptions) =>
     request<T>(endpoint, {

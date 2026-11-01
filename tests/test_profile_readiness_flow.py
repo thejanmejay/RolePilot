@@ -186,7 +186,19 @@ def test_05_search_criteria_configuration(auth_headers):
 
 def test_06_resume_upload_and_versioning(auth_headers):
     """Test PDF upload, parsing activation, replacement with v2, and deletion."""
-    pdf_v1 = b"%PDF-1.4\n1 0 obj\n<< /Title (Janmejay_Kumar_Singh_QA) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF"
+    pdf_v1 = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Title (Janmejay_Kumar_Singh_QA_v1) >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Catalog /Pages 3 0 R >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n"
+        b"4 0 obj\n<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>\nendobj\n"
+        b"5 0 obj\n<< /Length 260 >>\nstream\n"
+        b"BT /F1 12 Tf 50 700 Td (Alex Morgan) Tj 0 -20 Td (alex@example.com) Tj 0 -20 Td (QA SDET Engineer with test automation skills in Python, Playwright, and Pytest.) Tj ET\n"
+        b"endstream\nendobj\n"
+        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        b"xref\n0 7\n0000000000 65535 f \n"
+        b"trailer\n<< /Size 7 /Root 2 0 R >>\nstartxref\n600\n%%EOF"
+    )
     files_v1 = {"file": ("Janmejay_Kumar_Singh_QA_v1.pdf", io.BytesIO(pdf_v1), "application/pdf")}
 
     # 1. Upload v1
@@ -199,7 +211,19 @@ def test_06_resume_upload_and_versioning(auth_headers):
     assert v1_data["is_active"] is True
 
     # 2. Upload v2 (Replace)
-    pdf_v2 = b"%PDF-1.4\n1 0 obj\n<< /Title (Janmejay_Kumar_Singh_QA_v2) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF"
+    pdf_v2 = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Title (Janmejay_Kumar_Singh_QA_v2) >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Catalog /Pages 3 0 R >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n"
+        b"4 0 obj\n<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>\nendobj\n"
+        b"5 0 obj\n<< /Length 260 >>\nstream\n"
+        b"BT /F1 12 Tf 50 700 Td (Alex Morgan) Tj 0 -20 Td (alex@example.com) Tj 0 -20 Td (Lead QA SDET Engineer with test automation skills in Python, Playwright, and Pytest.) Tj ET\n"
+        b"endstream\nendobj\n"
+        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        b"xref\n0 7\n0000000000 65535 f \n"
+        b"trailer\n<< /Size 7 /Root 2 0 R >>\nstartxref\n600\n%%EOF"
+    )
     files_v2 = {"file": ("Janmejay_Kumar_Singh_QA_v2.pdf", io.BytesIO(pdf_v2), "application/pdf")}
     res2 = client.post("/api/v1/resumes/upload", files=files_v2, headers=auth_headers)
     assert res2.status_code == 201
@@ -324,6 +348,19 @@ def test_08_end_to_end_dry_run_workflow(auth_headers):
         raw_data={"is_easy_apply": True},
     )
     db.add(seed_job)
+    from backend.app.db.models.synced_job import SyncedJob
+    db.add(SyncedJob(
+        user_id=TEST_USER_ID,
+        job_id=job_id,
+        linkedin_job_id=seed_job.linkedin_job_id,
+        listing_url=seed_job.job_url,
+        title=seed_job.title,
+        company=seed_job.company,
+        location=seed_job.location,
+        description=seed_job.description,
+        source_platform="linkedin",
+        source_page_url=seed_job.job_url,
+    ))
     db.commit()
     db.close()
 

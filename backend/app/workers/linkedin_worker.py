@@ -364,12 +364,27 @@ async def execute_automation_run(
             db.commit()
             db.refresh(profile)
 
-        resume_query = select(Resume).where(Resume.user_id == user_id)
+        resume_query = select(Resume).where(
+            Resume.user_id == user_id,
+            Resume.is_valid_document == True,
+            Resume.document_status == "verified",
+        )
         if run.resume_id:
             resume_query = resume_query.where(Resume.id == run.resume_id)
         else:
             resume_query = resume_query.where(Resume.is_active == True).order_by(Resume.version.desc())
         active_resume = db.execute(resume_query).scalars().first()
+
+        # Fail fast if the active resume's physical file has been deleted or is missing from storage
+        if active_resume:
+            from backend.app.services.resume_verification_service import ResumeVerificationService
+            file_bytes = ResumeVerificationService._retrieve_file_bytes(
+                user_id=active_resume.user_id,
+                resume_id=active_resume.id,
+                storage_path=active_resume.storage_path,
+            )
+            if not file_bytes:
+                active_resume = None
         if run.selected_synced_job_ids is not None and active_resume is None:
             run.status = "failed"
             run.error_message = "The resume selected for this run is no longer available. Review the jobs and retry with an active resume."

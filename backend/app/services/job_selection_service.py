@@ -106,10 +106,8 @@ class JobSelectionService:
                 "message": "Create a saved search preference on the RolePilot website before reviewing these jobs.",
             })
 
-        resume = db.execute(select(Resume).where(
-            Resume.user_id == user_id,
-            Resume.is_active.is_(True),
-        ).order_by(Resume.version.desc())).scalars().first()
+        from backend.app.services.resume_service import ResumeService
+        resume = ResumeService.get_active_resume(db, user_id)
         linked_in = LinkedInSessionService.get_status(db, user_id)
 
         application_rows = {}
