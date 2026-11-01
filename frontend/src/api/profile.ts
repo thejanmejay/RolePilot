@@ -60,12 +60,27 @@ export const profileApi = {
   /** List uploaded candidate resumes */
   getResumes: () => apiClient.get<import('../types/profile').Resume[]>('/api/v1/resumes'),
 
+  /** Download / stream candidate resume PDF as a Blob */
+  getResumeFileBlob: (resumeId: string) =>
+    apiClient.getBlob(`/api/v1/resumes/${resumeId}/file`),
+
   /** Upload a PDF resume */
   uploadResume: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
     return apiClient.post<import('../types/profile').Resume>('/api/v1/resumes/upload', formData);
   },
+
+  /** Upload a replacement resume, draft v+1, parse structure, and compute profile diff */
+  replaceResume: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.post<import('../types/profile').ResumeReplacementResponse>('/api/v1/resumes/replace', formData);
+  },
+
+  /** Activate replacement resume and synchronize candidate profile */
+  activateResume: (resumeId: string, payload: import('../types/profile').ResumeActivationRequest) =>
+    apiClient.post<import('../types/profile').ResumeActivationResponse>(`/api/v1/resumes/${resumeId}/activate`, payload),
 
   /** Delete a resume */
   deleteResume: (resumeId: string) =>

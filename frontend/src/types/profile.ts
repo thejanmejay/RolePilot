@@ -111,6 +111,45 @@ export interface Resume {
   created_at: string;
 }
 
+export interface ConflictField {
+  field: string;
+  label: string;
+  current_value?: any;
+  extracted_value?: any;
+  description: string;
+}
+
+export interface ProfileSyncDiff {
+  fields_updated: Record<string, { old: any; new: any }>;
+  skills_to_add: string[];
+  experiences_to_add: Array<Record<string, any>>;
+  educations_to_add: Array<Record<string, any>>;
+  conflicts: ConflictField[];
+  preserved_fields: string[];
+}
+
+export interface ResumeReplacementResponse {
+  new_resume: Resume;
+  previous_active_resume_id?: string | null;
+  diff: ProfileSyncDiff;
+  has_conflicts: boolean;
+  status: string;
+}
+
+export interface ResumeActivationRequest {
+  accepted_fields?: Record<string, any>;
+  add_skills?: boolean;
+  add_experiences?: boolean;
+  add_educations?: boolean;
+  clear_stale_fields?: boolean;
+}
+
+export interface ResumeActivationResponse {
+  resume: Resume;
+  message: string;
+  profile_updated: boolean;
+}
+
 export interface ProfileUpdate {
   first_name?: string | null;
   last_name?: string | null;
@@ -144,5 +183,7 @@ export interface OnboardingData {
   city?: string;
   country?: string;
   phone?: string;
+  current_ctc?: number | null;
+  expected_ctc?: number | null;
 }
 

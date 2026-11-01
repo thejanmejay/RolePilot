@@ -100,7 +100,7 @@ export const ResumePreviewModal: React.FC<ResumePreviewModalProps> = ({
     if (currentResume?.id) {
       profileApi
         .getResumeFileBlob(currentResume.id)
-        .then((blob) => {
+        .then((blob: Blob) => {
           if (!isMounted) return;
           if (blob.size === 0) {
             setPdfLoadError('The document binary is empty or unavailable.');
@@ -111,7 +111,7 @@ export const ResumePreviewModal: React.FC<ResumePreviewModalProps> = ({
           setBlobUrl(objectUrl);
           setIsLoadingPdf(false);
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           if (!isMounted) return;
           setPdfLoadError(
             formatErrorMessage(err) || 'Unable to retrieve document preview from storage.'
@@ -171,7 +171,7 @@ export const ResumePreviewModal: React.FC<ResumePreviewModalProps> = ({
       // Pre-select replacement values for conflicting fields by default
       const initialOverrides: Record<string, any> = {};
       if (response.diff.conflicts && response.diff.conflicts.length > 0) {
-        response.diff.conflicts.forEach((c) => {
+        response.diff.conflicts.forEach((c: ConflictField) => {
           initialOverrides[c.field] = c.extracted_value;
         });
         setSelectedFieldOverrides(initialOverrides);
