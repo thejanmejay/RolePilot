@@ -7,6 +7,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import threading
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException, UploadFile, status
@@ -51,6 +52,18 @@ def get_local_resume_path(user_id: uuid.UUID, resume_id: uuid.UUID) -> Path:
     base_dir = Path("data") / "resumes" / str(user_id)
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / f"{resume_id}.pdf"
+
+
+_user_activation_locks: Dict[uuid.UUID, threading.Lock] = {}
+_activation_mutex = threading.Lock()
+
+
+def _get_user_activation_lock(user_id: uuid.UUID) -> threading.Lock:
+    """Thread-safe user-scoped activation lock to prevent concurrent activation race conditions."""
+    with _activation_mutex:
+        if user_id not in _user_activation_locks:
+            _user_activation_locks[user_id] = threading.Lock()
+        return _user_activation_locks[user_id]
 
 
 def save_local_resume_bytes(user_id: uuid.UUID, resume_id: uuid.UUID, content: bytes) -> bool:
@@ -593,270 +606,271 @@ class ResumeService:
         payload: ResumeActivationRequest,
     ) -> ResumeActivationResponse:
         """Activate the replacement resume version and apply candidate profile updates."""
-        resume = ResumeService.get_resume_by_id(db, user_id, resume_id)
-        if not resume:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Resume not found",
-            )
+        with _get_user_activation_lock(user_id):
+            resume = ResumeService.get_resume_by_id(db, user_id, resume_id)
+            if not resume:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Resume not found",
+                )
 
-        # Explicit server-side verification check: ONLY verified resumes may be activated
-        if not resume.is_valid_document or resume.document_status != "verified":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot activate unverified resume '{resume.id}' (status: '{resume.document_status}', valid: {resume.is_valid_document}). Only verified resumes can be activated.",
-            )
+            # Explicit server-side verification check: ONLY verified resumes may be activated
+            if not resume.is_valid_document or resume.document_status != "verified":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot activate unverified resume '{resume.id}' (status: '{resume.document_status}', valid: {resume.is_valid_document}). Only verified resumes can be activated.",
+                )
 
-        profile = db.execute(select(Profile).where(Profile.id == user_id)).scalar_one_or_none()
-        if not profile:
-            profile = Profile(id=user_id)
-            db.add(profile)
-            db.flush()
+            profile = db.execute(select(Profile).where(Profile.id == user_id)).scalar_one_or_none()
+            if not profile:
+                profile = Profile(id=user_id)
+                db.add(profile)
+                db.flush()
 
-        parsed_data = resume.parsed_data or {}
+            parsed_data = resume.parsed_data or {}
 
-        # Identify previous active resume to track record provenance
-        previous_active = db.execute(
-            select(Resume)
-            .where(Resume.user_id == user_id, Resume.is_active == True, Resume.id != resume.id)
-            .order_by(Resume.version.desc())
-        ).scalars().first()
-        prev_parsed = (previous_active.parsed_data or {}) if previous_active else {}
+            # Identify previous active resume to track record provenance
+            previous_active = db.execute(
+                select(Resume)
+                .where(Resume.user_id == user_id, Resume.is_active == True, Resume.id != resume.id)
+                .order_by(Resume.version.desc())
+            ).scalars().first()
+            prev_parsed = (previous_active.parsed_data or {}) if previous_active else {}
 
-        try:
-            # 1. Reconcile scalar profile fields
-            resume_fields = [
-                "first_name", "last_name", "phone", "city", "country",
-                "headline", "target_role", "about", "linkedin_url", "github_url", "website_url"
-            ]
+            try:
+                # 1. Reconcile scalar profile fields
+                resume_fields = [
+                    "first_name", "last_name", "phone", "city", "country",
+                    "headline", "target_role", "about", "linkedin_url", "github_url", "website_url"
+                ]
 
-            for field in resume_fields:
-                if payload.accepted_fields and field in payload.accepted_fields:
-                    # Explicit candidate override (e.g. Keep Current or Apply New)
-                    setattr(profile, field, payload.accepted_fields[field])
-                else:
-                    new_val = parsed_data.get(field)
-                    curr_val = getattr(profile, field, None)
-                    prev_val = prev_parsed.get(field)
-
-                    if new_val:
-                        setattr(profile, field, new_val)
-                    elif getattr(payload, "clear_stale_fields", False):
-                        # Provenance check: If curr_val matches what Resume A provided, it is a stale resume-derived field
-                        if curr_val and prev_val and str(curr_val).strip() == str(prev_val).strip():
-                            setattr(profile, field, None)
-
-            if payload.accepted_fields and "experience_years" in payload.accepted_fields:
-                profile.experience_years = payload.accepted_fields["experience_years"]
-            elif parsed_data.get("experience_years") is not None:
-                profile.experience_years = parsed_data["experience_years"]
-
-            # 2. Reconcile Skills with Provenance
-            if payload.add_skills:
-                raw_skills = parsed_data.get("skills", [])
-                extracted_skills = []
-                for sk in raw_skills:
-                    s_name = sk.get("name") if isinstance(sk, dict) else sk
-                    if isinstance(s_name, str) and s_name.strip():
-                        extracted_skills.append(s_name.strip())
-
-                # De-duplicate incoming
-                seen_new_skills = set()
-                deduped_new_skills = []
-                for sk in extracted_skills:
-                    if sk.lower() not in seen_new_skills:
-                        seen_new_skills.add(sk.lower())
-                        deduped_new_skills.append(sk)
-
-                raw_prev_skills = prev_parsed.get("skills", [])
-                prev_skills = set()
-                for ps in raw_prev_skills:
-                    ps_name = ps.get("name") if isinstance(ps, dict) else ps
-                    if isinstance(ps_name, str) and ps_name.strip():
-                        prev_skills.add(ps_name.strip().lower())
-
-                existing_skills = list(db.execute(select(Skill).where(Skill.user_id == user_id)).scalars().all())
-                existing_by_lower = {s.name.strip().lower(): s for s in existing_skills if s.name}
-
-                # Add new skills
-                for proper_name in deduped_new_skills:
-                    lower_name = proper_name.lower()
-                    if lower_name not in existing_by_lower:
-                        db.add(Skill(user_id=user_id, name=proper_name))
-
-                # Safe Provenance Pruning:
-                # Remove an existing skill ONLY IF it was extracted from Resume A (in prev_skills)
-                # and is absent from Resume B, provided the candidate didn't manually configure it (years/months > 0).
-                # Manually added skills (NOT in prev_skills) are ALWAYS PRESERVED!
-                for lower_name, s in existing_by_lower.items():
-                    if lower_name not in seen_new_skills:
-                        if lower_name in prev_skills and s.years == 0 and s.months == 0:
-                            db.delete(s)
-
-            # 3. Reconcile Experiences with Provenance & Multi-Period Support
-            if payload.add_experiences:
-                from backend.app.api.profile_extraction import _parse_date
-
-                def _normalize_company(name: str) -> str:
-                    c = (name or "").strip().lower()
-                    c_clean = re.sub(r"\b(llc|inc\.?|ltd\.?|corp\.?|corporation|technologies|solutions|services)\b", "", c).strip(",. ")
-                    return c_clean if c_clean else c
-
-                def _exp_matches(e1: Dict[str, Any] | Experience, e2: Dict[str, Any] | Experience) -> bool:
-                    c1 = _normalize_company(getattr(e1, "company_name", None) or (e1.get("company_name", "") if isinstance(e1, dict) else ""))
-                    c2 = _normalize_company(getattr(e2, "company_name", None) or (e2.get("company_name", "") if isinstance(e2, dict) else ""))
-                    if not c1 or not c2 or c1 != c2:
-                        return False
-
-                    t1 = (getattr(e1, "job_title", None) or (e1.get("job_title", "") if isinstance(e1, dict) else "")).strip().lower()
-                    t2 = (getattr(e2, "job_title", None) or (e2.get("job_title", "") if isinstance(e2, dict) else "")).strip().lower()
-                    if not t1 or not t2 or t1 != t2:
-                        return False
-
-                    s1 = getattr(e1, "start_date", None) or (e1.get("start_date") if isinstance(e1, dict) else None)
-                    s2 = getattr(e2, "start_date", None) or (e2.get("start_date") if isinstance(e2, dict) else None)
-                    if s1 and s2:
-                        return str(s1)[:7] == str(s2)[:7]
-                    return True
-
-                extracted_exps = parsed_data.get("experiences", [])
-
-                # De-duplicate incoming records
-                deduped_exps = []
-                for exp in extracted_exps:
-                    if not exp.get("company_name") or not exp.get("job_title"):
-                        continue
-                    if not any(_exp_matches(exp, d) for d in deduped_exps):
-                        deduped_exps.append(exp)
-
-                prev_exps = [e for e in prev_parsed.get("experiences", []) if e.get("company_name") and e.get("job_title")]
-                existing_exps = list(db.execute(select(Experience).where(Experience.user_id == user_id)).scalars().all())
-                retained_exp_ids = set()
-
-                for exp in deduped_exps:
-                    c_name = (exp.get("company_name") or "").strip()
-                    j_title = (exp.get("job_title") or "").strip()
-                    s_date = _parse_date(exp.get("start_date"))
-                    e_date = _parse_date(exp.get("end_date"))
-                    desc = exp.get("description")
-
-                    matched_existing = next((e for e in existing_exps if e.id not in retained_exp_ids and _exp_matches(e, exp)), None)
-                    if matched_existing:
-                        matched_existing.company_name = c_name
-                        matched_existing.job_title = j_title
-                        matched_existing.start_date = s_date
-                        matched_existing.end_date = e_date
-                        matched_existing.description = desc
-                        retained_exp_ids.add(matched_existing.id)
+                for field in resume_fields:
+                    if payload.accepted_fields and field in payload.accepted_fields:
+                        # Explicit candidate override (e.g. Keep Current or Apply New)
+                        setattr(profile, field, payload.accepted_fields[field])
                     else:
-                        new_item = Experience(
-                            user_id=user_id,
-                            company_name=c_name,
-                            job_title=j_title,
-                            start_date=s_date,
-                            end_date=e_date,
-                            description=desc,
-                        )
-                        db.add(new_item)
+                        new_val = parsed_data.get(field)
+                        curr_val = getattr(profile, field, None)
+                        prev_val = prev_parsed.get(field)
 
-                # Provenance Check for Deletion:
-                # Delete an existing experience ONLY IF it belonged to Resume A (matches prev_exps)
-                # and is not in Resume B. Manually added experiences (NOT in prev_exps) ARE PRESERVED!
-                for e in existing_exps:
-                    if e.id not in retained_exp_ids:
-                        if any(_exp_matches(e, pe) for pe in prev_exps):
-                            db.delete(e)
+                        if new_val:
+                            setattr(profile, field, new_val)
+                        elif getattr(payload, "clear_stale_fields", False):
+                            # Provenance check: If curr_val matches what Resume A provided, it is a stale resume-derived field
+                            if curr_val and prev_val and str(curr_val).strip() == str(prev_val).strip():
+                                setattr(profile, field, None)
 
-            # 4. Reconcile Educations with Provenance & Multi-Degree Support
-            if payload.add_educations:
-                def _edu_matches(e1: Dict[str, Any] | Education, e2: Dict[str, Any] | Education) -> bool:
-                    i1 = (getattr(e1, "institution", None) or (e1.get("institution", "") if isinstance(e1, dict) else "")).strip().lower()
-                    i2 = (getattr(e2, "institution", None) or (e2.get("institution", "") if isinstance(e2, dict) else "")).strip().lower()
-                    if not i1 or not i2 or i1 != i2:
-                        return False
-                    d1 = (getattr(e1, "degree", None) or (e1.get("degree", "") if isinstance(e1, dict) else "")).strip().lower()
-                    d2 = (getattr(e2, "degree", None) or (e2.get("degree", "") if isinstance(e2, dict) else "")).strip().lower()
-                    if d1 and d2 and d1 != d2:
-                        return False
-                    f1 = (getattr(e1, "field_of_study", None) or (e1.get("field_of_study", "") if isinstance(e1, dict) else "")).strip().lower()
-                    f2 = (getattr(e2, "field_of_study", None) or (e2.get("field_of_study", "") if isinstance(e2, dict) else "")).strip().lower()
-                    if f1 and f2 and f1 != f2:
-                        return False
-                    return True
+                if payload.accepted_fields and "experience_years" in payload.accepted_fields:
+                    profile.experience_years = payload.accepted_fields["experience_years"]
+                elif parsed_data.get("experience_years") is not None:
+                    profile.experience_years = parsed_data["experience_years"]
 
-                extracted_edus = parsed_data.get("educations", [])
+                # 2. Reconcile Skills with Provenance
+                if payload.add_skills:
+                    raw_skills = parsed_data.get("skills", [])
+                    extracted_skills = []
+                    for sk in raw_skills:
+                        s_name = sk.get("name") if isinstance(sk, dict) else sk
+                        if isinstance(s_name, str) and s_name.strip():
+                            extracted_skills.append(s_name.strip())
 
-                # De-duplicate incoming
-                deduped_edus = []
-                for edu in extracted_edus:
-                    if not edu.get("institution"):
-                        continue
-                    if not any(_edu_matches(edu, d) for d in deduped_edus):
-                        deduped_edus.append(edu)
+                    # De-duplicate incoming
+                    seen_new_skills = set()
+                    deduped_new_skills = []
+                    for sk in extracted_skills:
+                        if sk.lower() not in seen_new_skills:
+                            seen_new_skills.add(sk.lower())
+                            deduped_new_skills.append(sk)
 
-                prev_edus = [ed for ed in prev_parsed.get("educations", []) if ed.get("institution")]
-                existing_edus = list(db.execute(select(Education).where(Education.user_id == user_id)).scalars().all())
-                retained_edu_ids = set()
+                    raw_prev_skills = prev_parsed.get("skills", [])
+                    prev_skills = set()
+                    for ps in raw_prev_skills:
+                        ps_name = ps.get("name") if isinstance(ps, dict) else ps
+                        if isinstance(ps_name, str) and ps_name.strip():
+                            prev_skills.add(ps_name.strip().lower())
 
-                for edu in deduped_edus:
-                    inst = (edu.get("institution") or "").strip()
-                    deg = edu.get("degree")
-                    fos = edu.get("field_of_study")
-                    s_year = edu.get("start_year")
-                    e_year = edu.get("end_year")
-                    desc = edu.get("description")
+                    existing_skills = list(db.execute(select(Skill).where(Skill.user_id == user_id)).scalars().all())
+                    existing_by_lower = {s.name.strip().lower(): s for s in existing_skills if s.name}
 
-                    matched_existing = next((e for e in existing_edus if e.id not in retained_edu_ids and _edu_matches(e, edu)), None)
-                    if matched_existing:
-                        matched_existing.degree = deg
-                        matched_existing.field_of_study = fos
-                        matched_existing.start_year = s_year
-                        matched_existing.end_year = e_year
-                        matched_existing.description = desc
-                        retained_edu_ids.add(matched_existing.id)
-                    else:
-                        new_item = Education(
-                            user_id=user_id,
-                            institution=inst,
-                            degree=deg,
-                            field_of_study=fos,
-                            start_year=s_year,
-                            end_year=e_year,
-                            description=desc,
-                        )
-                        db.add(new_item)
+                    # Add new skills
+                    for proper_name in deduped_new_skills:
+                        lower_name = proper_name.lower()
+                        if lower_name not in existing_by_lower:
+                            db.add(Skill(user_id=user_id, name=proper_name))
 
-                # Provenance Check for Deletion:
-                # Delete an existing education ONLY IF it belonged to Resume A (matches prev_edus).
-                # Manually added educations (NOT in prev_edus) ARE PRESERVED!
-                for ed in existing_edus:
-                    if ed.id not in retained_edu_ids:
-                        if any(_edu_matches(ed, pe) for pe in prev_edus):
-                            db.delete(ed)
+                    # Safe Provenance Pruning:
+                    # Remove an existing skill ONLY IF it was extracted from Resume A (in prev_skills)
+                    # and is absent from Resume B, provided the candidate didn't manually configure it (years/months > 0).
+                    # Manually added skills (NOT in prev_skills) are ALWAYS PRESERVED!
+                    for lower_name, s in existing_by_lower.items():
+                        if lower_name not in seen_new_skills:
+                            if lower_name in prev_skills and s.years == 0 and s.months == 0:
+                                db.delete(s)
 
-            # 5. Atomically deactivate other resumes and activate the replacement
-            db.execute(
-                update(Resume)
-                .where(Resume.user_id == user_id, Resume.id != resume.id)
-                .values(is_active=False)
+                # 3. Reconcile Experiences with Provenance & Multi-Period Support
+                if payload.add_experiences:
+                    from backend.app.api.profile_extraction import _parse_date
+
+                    def _normalize_company(name: str) -> str:
+                        c = (name or "").strip().lower()
+                        c_clean = re.sub(r"\b(llc|inc\.?|ltd\.?|corp\.?|corporation|technologies|solutions|services)\b", "", c).strip(",. ")
+                        return c_clean if c_clean else c
+
+                    def _exp_matches(e1: Dict[str, Any] | Experience, e2: Dict[str, Any] | Experience) -> bool:
+                        c1 = _normalize_company(getattr(e1, "company_name", None) or (e1.get("company_name", "") if isinstance(e1, dict) else ""))
+                        c2 = _normalize_company(getattr(e2, "company_name", None) or (e2.get("company_name", "") if isinstance(e2, dict) else ""))
+                        if not c1 or not c2 or c1 != c2:
+                            return False
+
+                        t1 = (getattr(e1, "job_title", None) or (e1.get("job_title", "") if isinstance(e1, dict) else "")).strip().lower()
+                        t2 = (getattr(e2, "job_title", None) or (e2.get("job_title", "") if isinstance(e2, dict) else "")).strip().lower()
+                        if not t1 or not t2 or t1 != t2:
+                            return False
+
+                        s1 = getattr(e1, "start_date", None) or (e1.get("start_date") if isinstance(e1, dict) else None)
+                        s2 = getattr(e2, "start_date", None) or (e2.get("start_date") if isinstance(e2, dict) else None)
+                        if s1 and s2:
+                            return str(s1)[:7] == str(s2)[:7]
+                        return True
+
+                    extracted_exps = parsed_data.get("experiences", [])
+
+                    # De-duplicate incoming records
+                    deduped_exps = []
+                    for exp in extracted_exps:
+                        if not exp.get("company_name") or not exp.get("job_title"):
+                            continue
+                        if not any(_exp_matches(exp, d) for d in deduped_exps):
+                            deduped_exps.append(exp)
+
+                    prev_exps = [e for e in prev_parsed.get("experiences", []) if e.get("company_name") and e.get("job_title")]
+                    existing_exps = list(db.execute(select(Experience).where(Experience.user_id == user_id)).scalars().all())
+                    retained_exp_ids = set()
+
+                    for exp in deduped_exps:
+                        c_name = (exp.get("company_name") or "").strip()
+                        j_title = (exp.get("job_title") or "").strip()
+                        s_date = _parse_date(exp.get("start_date"))
+                        e_date = _parse_date(exp.get("end_date"))
+                        desc = exp.get("description")
+
+                        matched_existing = next((e for e in existing_exps if e.id not in retained_exp_ids and _exp_matches(e, exp)), None)
+                        if matched_existing:
+                            matched_existing.company_name = c_name
+                            matched_existing.job_title = j_title
+                            matched_existing.start_date = s_date
+                            matched_existing.end_date = e_date
+                            matched_existing.description = desc
+                            retained_exp_ids.add(matched_existing.id)
+                        else:
+                            new_item = Experience(
+                                user_id=user_id,
+                                company_name=c_name,
+                                job_title=j_title,
+                                start_date=s_date,
+                                end_date=e_date,
+                                description=desc,
+                            )
+                            db.add(new_item)
+
+                    # Provenance Check for Deletion:
+                    # Delete an existing experience ONLY IF it belonged to Resume A (matches prev_exps)
+                    # and is not in Resume B. Manually added experiences (NOT in prev_exps) ARE PRESERVED!
+                    for e in existing_exps:
+                        if e.id not in retained_exp_ids:
+                            if any(_exp_matches(e, pe) for pe in prev_exps):
+                                db.delete(e)
+
+                # 4. Reconcile Educations with Provenance & Multi-Degree Support
+                if payload.add_educations:
+                    def _edu_matches(e1: Dict[str, Any] | Education, e2: Dict[str, Any] | Education) -> bool:
+                        i1 = (getattr(e1, "institution", None) or (e1.get("institution", "") if isinstance(e1, dict) else "")).strip().lower()
+                        i2 = (getattr(e2, "institution", None) or (e2.get("institution", "") if isinstance(e2, dict) else "")).strip().lower()
+                        if not i1 or not i2 or i1 != i2:
+                            return False
+                        d1 = (getattr(e1, "degree", None) or (e1.get("degree", "") if isinstance(e1, dict) else "")).strip().lower()
+                        d2 = (getattr(e2, "degree", None) or (e2.get("degree", "") if isinstance(e2, dict) else "")).strip().lower()
+                        if d1 and d2 and d1 != d2:
+                            return False
+                        f1 = (getattr(e1, "field_of_study", None) or (e1.get("field_of_study", "") if isinstance(e1, dict) else "")).strip().lower()
+                        f2 = (getattr(e2, "field_of_study", None) or (e2.get("field_of_study", "") if isinstance(e2, dict) else "")).strip().lower()
+                        if f1 and f2 and f1 != f2:
+                            return False
+                        return True
+
+                    extracted_edus = parsed_data.get("educations", [])
+
+                    # De-duplicate incoming
+                    deduped_edus = []
+                    for edu in extracted_edus:
+                        if not edu.get("institution"):
+                            continue
+                        if not any(_edu_matches(edu, d) for d in deduped_edus):
+                            deduped_edus.append(edu)
+
+                    prev_edus = [ed for ed in prev_parsed.get("educations", []) if ed.get("institution")]
+                    existing_edus = list(db.execute(select(Education).where(Education.user_id == user_id)).scalars().all())
+                    retained_edu_ids = set()
+
+                    for edu in deduped_edus:
+                        inst = (edu.get("institution") or "").strip()
+                        deg = edu.get("degree")
+                        fos = edu.get("field_of_study")
+                        s_year = edu.get("start_year")
+                        e_year = edu.get("end_year")
+                        desc = edu.get("description")
+
+                        matched_existing = next((e for e in existing_edus if e.id not in retained_edu_ids and _edu_matches(e, edu)), None)
+                        if matched_existing:
+                            matched_existing.degree = deg
+                            matched_existing.field_of_study = fos
+                            matched_existing.start_year = s_year
+                            matched_existing.end_year = e_year
+                            matched_existing.description = desc
+                            retained_edu_ids.add(matched_existing.id)
+                        else:
+                            new_item = Education(
+                                user_id=user_id,
+                                institution=inst,
+                                degree=deg,
+                                field_of_study=fos,
+                                start_year=s_year,
+                                end_year=e_year,
+                                description=desc,
+                            )
+                            db.add(new_item)
+
+                    # Provenance Check for Deletion:
+                    # Delete an existing education ONLY IF it belonged to Resume A (matches prev_edus).
+                    # Manually added educations (NOT in prev_edus) ARE PRESERVED!
+                    for ed in existing_edus:
+                        if ed.id not in retained_edu_ids:
+                            if any(_edu_matches(ed, pe) for pe in prev_edus):
+                                db.delete(ed)
+
+                # 5. Atomically deactivate other resumes and activate the replacement
+                db.execute(
+                    update(Resume)
+                    .where(Resume.user_id == user_id, Resume.id != resume.id)
+                    .values(is_active=False)
+                )
+                resume.is_active = True
+
+                # Synchronize active_application_resumes table
+                ResumeService._sync_active_application_resume_pointer(db, user_id, resume.id)
+
+                db.commit()
+                db.refresh(resume)
+                db.refresh(profile)
+            except Exception:
+                db.rollback()
+                raise
+
+            return ResumeActivationResponse(
+                resume=ResumeResponse.model_validate(resume),
+                message=f"Resume v{resume.version} activated and candidate profile synchronized successfully.",
+                profile_updated=True,
             )
-            resume.is_active = True
-
-            # Synchronize active_application_resumes table
-            ResumeService._sync_active_application_resume_pointer(db, user_id, resume.id)
-
-            db.commit()
-            db.refresh(resume)
-            db.refresh(profile)
-        except Exception:
-            db.rollback()
-            raise
-
-        return ResumeActivationResponse(
-            resume=ResumeResponse.model_validate(resume),
-            message=f"Resume v{resume.version} activated and candidate profile synchronized successfully.",
-            profile_updated=True,
-        )
 
     @staticmethod
     def delete_resume(
