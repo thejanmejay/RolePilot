@@ -37,6 +37,9 @@ class Resume(Base):
     parsed_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_valid_document: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    document_status: Mapped[str] = mapped_column(Text, default="pending_verification", nullable=False)
+    file_mime_type: Mapped[str] = mapped_column(Text, default="application/pdf", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
