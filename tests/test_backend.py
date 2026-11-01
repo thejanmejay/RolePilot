@@ -158,7 +158,19 @@ def test_resume_upload_non_pdf_rejection(auth_headers_user_a):
 
 
 def test_resume_upload_and_isolation(auth_headers_user_a, auth_headers_user_b):
-    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Title (Test) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF"
+    pdf_content = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Title (Test) >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Catalog /Pages 3 0 R >>\nendobj\n"
+        b"3 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n"
+        b"4 0 obj\n<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>\nendobj\n"
+        b"5 0 obj\n<< /Length 260 >>\nstream\n"
+        b"BT /F1 12 Tf 50 700 Td (Alex Morgan) Tj 0 -20 Td (alex@example.com) Tj 0 -20 Td (Software Engineer ...) Tj ET\n"
+        b"endstream\nendobj\n"
+        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        b"xref\n0 7\n0000000000 65535 f \n"
+        b"trailer\n<< /Size 7 /Root 2 0 R >>\nstartxref\n600\n%%EOF"
+    )
     files = {"file": ("my_resume.pdf", io.BytesIO(pdf_content), "application/pdf")}
 
     res = client.post("/api/v1/resumes/upload", files=files, headers=auth_headers_user_a)

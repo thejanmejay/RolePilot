@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import io
 import os
+from pathlib import Path
 import uuid
 import pytest
 from sqlalchemy import select
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app.core.config import settings
@@ -551,4 +553,170 @@ def test_concurrency_and_data_consistency_scenarios():
         assert remaining_resumes[0].is_active is True, "Remaining verified resume must become active upon active deletion fallback"
     finally:
         db.close()
+
+
+def test_legacy_active_resume_consumer_safety_matrix():
+    """Verify all application consumers are protected against unverified/corrupt/missing legacy resumes."""
+    headers, uid = get_authenticated_user("legacy_consumer_user")
+
+    # 1. Seed a legacy resume with is_active=True, is_valid_document=False, document_status='pending_verification' (missing storage)
+    missing_id = uuid.uuid4()
+    db = next(get_db())
+    try:
+        legacy_missing = Resume(
+            id=missing_id,
+            user_id=uid,
+            file_name="legacy_missing.pdf",
+            storage_path=f"resumes/{uid}/{missing_id}.pdf",
+            version=1,
+            is_active=True,
+            is_valid_document=False,
+            document_status="pending_verification",
+        )
+        db.add(legacy_missing)
+        db.commit()
+    finally:
+        db.close()
+
+    # Verify ResumeService.get_active_resume deactivates and rejects the missing storage file on-access
+    db = next(get_db())
+    try:
+        active = ResumeService.get_active_resume(db, uid)
+        assert active is None, "get_active_resume must reject and deactivate resume with missing physical file"
+        rec_missing = db.get(Resume, missing_id)
+        assert rec_missing.is_active is False
+        assert rec_missing.document_status == "missing_storage"
+        assert rec_missing.is_valid_document is False
+    finally:
+        db.close()
+
+    # 2. Seed a legacy resume with corrupt file on disk
+    corrupt_id = uuid.uuid4()
+    local_dir = Path("data/resumes") / str(uid)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    corrupt_file = local_dir / f"{corrupt_id}.pdf"
+    corrupt_file.write_bytes(b"corrupt non-pdf contents")
+
+    db = next(get_db())
+    try:
+        legacy_corrupt = Resume(
+            id=corrupt_id,
+            user_id=uid,
+            file_name="legacy_corrupt.pdf",
+            storage_path=str(corrupt_file),
+            version=2,
+            is_active=True,
+            is_valid_document=False,
+            document_status="pending_verification",
+        )
+        db.add(legacy_corrupt)
+        db.commit()
+    finally:
+        db.close()
+
+    # get_active_resume must deactivate and mark it corrupt
+    db = next(get_db())
+    try:
+        active = ResumeService.get_active_resume(db, uid)
+        assert active is None, "get_active_resume must reject corrupt PDF"
+        rec_corrupt = db.get(Resume, corrupt_id)
+        assert rec_corrupt.is_active is False
+        assert rec_corrupt.document_status == "unsupported_format"
+        assert rec_corrupt.is_valid_document is False
+    finally:
+        db.close()
+
+    # Cleanup corrupt file
+    if corrupt_file.exists():
+        corrupt_file.unlink()
+
+    # 3. Test ProfileService.complete_onboarding fails when active resume is invalid
+    from backend.app.services.profile_service import ProfileService
+    import pytest
+    db = next(get_db())
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            ProfileService.finalize_onboarding(db, uid)
+        assert exc_info.value.status_code == 400
+        assert "Active verified PDF resume is required" in exc_info.value.detail
+    finally:
+        db.close()
+
+    # 4. Test JobSelectionService reports active_resume: False and JobMatchService ignores unverified resumes
+    from backend.app.services.job_selection_service import JobSelectionService
+    from backend.app.services.job_match.job_match_service import JobMatchService
+    from backend.app.db.models.search_config import SearchConfig
+    from backend.app.db.models.synced_job import SyncedJob
+    db = next(get_db())
+    try:
+        sc = SearchConfig(user_id=uid, name="QA", keywords="QA", location="Remote")
+        sj = SyncedJob(
+            user_id=uid,
+            linkedin_job_id="999111",
+            listing_url="https://www.linkedin.com/jobs/view/999111",
+            source_page_url="https://www.linkedin.com/jobs/search/",
+            title="QA Engineer",
+            company="Tech Corp",
+            source_platform="linkedin",
+        )
+        db.add_all([sc, sj])
+        db.commit()
+        preview = JobSelectionService.preview(db, uid, [sj.id])
+        assert preview["prerequisites"]["active_resume"] is False
+
+        # JobMatchService candidate context must not include corrupt/unverified resume data
+        ctx = JobMatchService._get_candidate_context(db, uid)
+        assert ctx["resume"] == {}
+    finally:
+        db.close()
+
+    # 5. Test AutomationService blocks run creation with unverified resume
+    from backend.app.services.automation_service import AutomationService
+    from backend.app.schemas.automation import AutomationRunCreate
+    db = next(get_db())
+    try:
+        run_payload = AutomationRunCreate(
+            mode="search_config",
+            search_config_id=sc.id,
+            resume_id=corrupt_id,
+            dry_run=True,
+            selected_synced_job_ids=None,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            AutomationService.create_run(db, uid, run_payload)
+        assert exc_info.value.status_code == 400
+        assert "An active verified resume" in exc_info.value.detail
+    finally:
+        db.close()
+
+    # 6. Test on-access verification of valid legacy resume via get_resumes
+    valid_id = uuid.uuid4()
+    valid_file = local_dir / f"{valid_id}.pdf"
+    valid_file.write_bytes(Path(RESUME_A_PATH).read_bytes())
+
+    db = next(get_db())
+    try:
+        legacy_valid = Resume(
+            id=valid_id,
+            user_id=uid,
+            file_name="legacy_valid.pdf",
+            storage_path=str(valid_file),
+            version=3,
+            is_active=False,
+            is_valid_document=False,
+            document_status="pending_verification",
+        )
+        db.add(legacy_valid)
+        db.commit()
+
+        # Calling get_resumes should trigger batch on-access verification
+        resumes = ResumeService.get_resumes(db, uid)
+        db.refresh(legacy_valid)
+        assert legacy_valid.document_status == "verified"
+        assert legacy_valid.is_valid_document is True
+    finally:
+        db.close()
+        if valid_file.exists():
+            valid_file.unlink()
+
 

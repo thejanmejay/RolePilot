@@ -33,6 +33,16 @@ class AutomationService:
                     detail="Search configuration not found or does not belong to user",
                 )
 
+        if run_in.resume_id:
+            if not db.execute(select(Resume.id).where(
+                Resume.id == run_in.resume_id,
+                Resume.user_id == user_id,
+                Resume.is_active.is_(True),
+                Resume.is_valid_document.is_(True),
+                Resume.document_status == "verified",
+            )).scalar_one_or_none():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An active verified resume owned by this account is required for this run.")
+
         selected_records = []
         if run_in.selected_synced_job_ids is not None:
             selected_records = list(db.execute(select(SyncedJob).where(
@@ -41,12 +51,8 @@ class AutomationService:
             ).with_for_update()).scalars().all())
             if len(selected_records) != len(run_in.selected_synced_job_ids) or any(not row.job_id for row in selected_records):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="One or more selected jobs are no longer synchronized and eligible.")
-            if not run_in.resume_id or not db.execute(select(Resume.id).where(
-                Resume.id == run_in.resume_id,
-                Resume.user_id == user_id,
-                Resume.is_active.is_(True),
-            )).scalar_one_or_none():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An active resume owned by this account is required for this run.")
+            if not run_in.resume_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An active verified resume owned by this account is required for this run.")
 
         # Idempotency check: Return existing run if idempotency_key is repeated
         if run_in.idempotency_key:

@@ -274,6 +274,11 @@ class ResumeService:
 
     @staticmethod
     def get_resumes(db: Session, user_id: uuid.UUID) -> List[Resume]:
+        from backend.app.services.resume_verification_service import ResumeVerificationService
+
+        # On-access verification for any legacy pending resumes
+        ResumeVerificationService.verify_all_pending_resumes(db, user_id)
+
         stmt = (
             select(Resume)
             .where(Resume.user_id == user_id)
@@ -607,6 +612,10 @@ class ResumeService:
     ) -> ResumeActivationResponse:
         """Activate the replacement resume version and apply candidate profile updates."""
         with _get_user_activation_lock(user_id):
+            if db.bind and db.bind.dialect.name == "postgresql":
+                # PostgreSQL transaction-level advisory lock serializes concurrent activations per user across all workers/processes
+                db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:uid))"), {"uid": str(user_id)})
+
             resume = ResumeService.get_resume_by_id(db, user_id, resume_id)
             if not resume:
                 raise HTTPException(
@@ -932,13 +941,37 @@ class ResumeService:
 
     @staticmethod
     def get_active_resume(db: Session, user_id: uuid.UUID) -> Optional[Resume]:
-        """Fetch currently active resume for user."""
+        """Fetch currently active verified resume for user, performing on-access verification if needed."""
         stmt = (
             select(Resume)
             .where(
                 Resume.user_id == user_id,
                 Resume.is_active == True,
+                Resume.is_valid_document == True,
+                Resume.document_status == "verified",
             )
             .order_by(Resume.version.desc())
         )
-        return db.execute(stmt).scalars().first()
+        active = db.execute(stmt).scalars().first()
+        if not active:
+            # On-access check for legacy pending resume claiming is_active
+            pending_stmt = (
+                select(Resume)
+                .where(
+                    Resume.user_id == user_id,
+                    Resume.is_active == True,
+                    Resume.document_status == "pending_verification",
+                )
+                .order_by(Resume.version.desc())
+            )
+            pending = db.execute(pending_stmt).scalars().first()
+            if pending:
+                from backend.app.services.resume_verification_service import ResumeVerificationService
+                is_valid, _ = ResumeVerificationService.verify_resume_document(db, user_id, pending.id, auto_commit=True)
+                if is_valid:
+                    return pending
+                else:
+                    pending.is_active = False
+                    db.commit()
+            return None
+        return active
