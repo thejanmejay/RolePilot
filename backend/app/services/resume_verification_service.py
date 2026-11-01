@@ -17,10 +17,6 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.db.models.resume import Resume
-from backend.app.services.resume_service import (
-    get_local_resume_path,
-    get_supabase_client,
-)
 
 logger = logging.getLogger("rolepilot.resume_verification")
 
@@ -106,6 +102,11 @@ class ResumeVerificationService:
         storage_path: str,
     ) -> Optional[bytes]:
         """Try retrieving bytes from local filesystem first, then Supabase Storage."""
+        from backend.app.services.resume_service import (
+            get_local_resume_path,
+            get_supabase_client,
+        )
+
         # Check local disk
         local_path = get_local_resume_path(user_id, resume_id)
         if local_path.is_file():
